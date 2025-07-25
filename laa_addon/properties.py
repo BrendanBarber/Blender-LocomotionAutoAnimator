@@ -11,6 +11,19 @@ from bpy.props import (
 )
 from mathutils import Vector
 
+def property_update_callback(self, context):
+    """Callback function for when properties are updated"""
+    # Import here to avoid circular imports
+    try:
+        from . import operators
+        operators.update_path_from_properties(context)
+    except ImportError:
+        try:
+            import operators
+            operators.update_path_from_properties(context)
+        except:
+            pass
+
 class AnimationPathProperties(PropertyGroup):
     """Properties for Animation Path creation and editing"""
     
@@ -18,72 +31,83 @@ class AnimationPathProperties(PropertyGroup):
         name="Start Position",
         description="Starting position of the animation path",
         default=(0.0, 0.0, 0.0),
-        subtype='TRANSLATION'
+        subtype='TRANSLATION',
+        update=property_update_callback
     )
     
     end_pos: FloatVectorProperty(
         name="End Position", 
         description="Ending position of the animation path",
         default=(5.0, 0.0, 0.0),
-        subtype='TRANSLATION'
+        subtype='TRANSLATION',
+        update=property_update_callback
     )
     
     start_frame: IntProperty(
         name="Start Frame",
         description="Frame when the path begins",
         default=1,
-        min=1
+        min=1,
+        update=property_update_callback
     )
     
     end_frame: IntProperty(
         name="End Frame",
         description="Frame when the path ends",
         default=100,
-        min=2
+        min=2,
+        update=property_update_callback
     )
     
     start_pose: StringProperty(
         name="Start Pose",
         description="Initial animation state",
-        default="idle"
+        default="idle",
+        update=property_update_callback
     )
     
     end_pose: StringProperty(
         name="End Pose",
         description="Final animation state",
-        default="idle"
+        default="idle",
+        update=property_update_callback
     )
     
     anim: StringProperty(
         name="Main Animation",
         description="Main animation loop during the path",
-        default="walk"
+        default="walk",
+        update=property_update_callback
     )
     
     start_blend_frames: IntProperty(
         name="Start Blend Frames",
         description="Frames to blend from start pose into main animation",
         default=5,
-        min=0
+        min=0,
+        update=property_update_callback
     )
     
     end_blend_frames: IntProperty(
         name="End Blend Frames",
         description="Frames to blend from main animation to end pose",
         default=5,
-        min=0
+        min=0,
+        update=property_update_callback
     )
     
     target_object: PointerProperty(
         name="Target Object",
         description="Object to animate along the path",
-        type=bpy.types.Object
+        type=bpy.types.Object,
+        update=property_update_callback
     )
     
     use_rotation: BoolProperty(
         name="Align to Path",
         description="Rotate object to face the direction of movement",
-        default=True
+        default=True,
+        update=property_update_callback
     )
     
     clear_existing_animation: BoolProperty(

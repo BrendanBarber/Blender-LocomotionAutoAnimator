@@ -28,6 +28,13 @@ class ANIMPATH_PT_main_panel(Panel):
         layout = self.layout
         props = context.scene.animation_path_props
         
+        # Show auto-sync status
+        obj = context.active_object
+        if obj and obj.get("is_animation_path"):
+            box = layout.box()
+            box.label(text=f"🔄 Auto-syncing: {obj.name}", icon='LINKED')
+            box.label(text="Properties automatically update path", icon='INFO')
+        
         box = layout.box()
         box.label(text="Animation Path Creator", icon='CURVE_PATH')
         
@@ -136,7 +143,7 @@ class ANIMPATH_PT_object_animation(Panel):
                     box.label(text=f"⚠ Target object '{target_obj_name}' not found", icon='ERROR')
             else:
                 box.label(text="No target object assigned", icon='INFO')
-                box.label(text="Set target in properties and update path")
+                box.label(text="Set target in properties above")
         
         else:
             layout.label(text="Select an Animation Path", icon='INFO')
@@ -144,7 +151,7 @@ class ANIMPATH_PT_object_animation(Panel):
 
 class ANIMPATH_PT_edit_panel(Panel):
     """Edit existing paths panel"""
-    bl_label = "Edit Path"
+    bl_label = "Manual Controls"
     bl_idname = "ANIMPATH_PT_edit_panel"
     bl_parent_id = "ANIMPATH_PT_main_panel"
     bl_space_type = 'VIEW_3D'
@@ -157,34 +164,23 @@ class ANIMPATH_PT_edit_panel(Panel):
         obj = context.active_object
         if obj and obj.get("is_animation_path"):
             box = layout.box()
-            box.label(text=f"Editing: {obj.name}", icon='CURVE_PATH')
+            box.label(text="Manual Override Controls", icon='TOOL_SETTINGS')
+            box.label(text="(Auto-sync is active)", icon='INFO')
             
             col = box.column(align=True)
-            col.label(text="Current Properties:")
-            col.label(text=f"Frames: {obj.get('start_frame', 'N/A')} - {obj.get('end_frame', 'N/A')}")
-            col.label(text=f"Start Pose: {obj.get('start_pose', 'N/A')}")
-            col.label(text=f"Main Anim: {obj.get('anim', 'N/A')}")
-            col.label(text=f"End Pose: {obj.get('end_pose', 'N/A')}")
-            
-            target_obj_name = obj.get("target_object")
-            if target_obj_name:
-                col.label(text=f"Target: {target_obj_name}")
-                use_rotation = obj.get("use_rotation", True)
-                col.label(text=f"Align to Path: {'Yes' if use_rotation else 'No'}")
-            
-            col = layout.column(align=True)
-            col.operator("animpath.load_path_to_properties", text="Load to Properties", icon='IMPORT')
-            col.operator("animpath.update_path", text="Update Path", icon='FILE_REFRESH')
+            col.operator("animpath.load_path_to_properties", text="Reload from Path", icon='IMPORT')
+            col.operator("animpath.update_path", text="Force Update Path", icon='FILE_REFRESH')
             
             col.separator()
             col.label(text="Curve Editing:")
-            col.operator("animpath.reset_curve_to_control_points", text="Reset Curve to Control Points", icon='CURVE_BEZCURVE')
+            col.operator("animpath.reset_curve_to_control_points", text="Reset Curve to Straight", icon='CURVE_BEZCURVE')
             
             col.separator()
             col.operator("animpath.delete_path", text="Delete Path", icon='TRASH')
             
         else:
-            layout.label(text="Select an Animation Path to edit", icon='INFO')
+            layout.label(text="Select an Animation Path", icon='INFO')
+            layout.label(text="Properties will auto-sync when selected")
 
 class ANIMPATH_PT_control_points_panel(Panel):
     """Control points information panel"""
@@ -214,7 +210,7 @@ class ANIMPATH_PT_control_points_panel(Panel):
             
             col.separator()
             col.label(text="Move this point to adjust curve shape", icon='INFO')
-            col.label(text="Then click 'Reset Curve to Control Points'")
+            col.label(text="Position auto-syncs with properties panel")
             
         elif obj and obj.get("is_animation_path"):
             box = layout.box()
@@ -248,8 +244,9 @@ class ANIMPATH_PT_control_points_panel(Panel):
                 
                 col.separator()
                 col.label(text="Instructions:", icon='INFO')
-                col.label(text="• Select and move control points")
-                col.label(text="• Reset curve when done")
+                col.label(text="• Control points auto-sync with properties")
+                col.label(text="• Move points to adjust curve shape")
+                col.label(text="• Changes update properties panel")
                 col.label(text="• Use 'Animate Object Along Path'")
                 col.label(text="  to apply movement to target object")
                 
@@ -266,7 +263,8 @@ class ANIMPATH_PT_control_points_panel(Panel):
             layout.label(text="Workflow:")
             layout.label(text="1. Create animation path")
             layout.label(text="2. Assign target object")
-            layout.label(text="3. Animate object along path")
+            layout.label(text="3. Properties auto-sync when selected")
+            layout.label(text="4. Animate object along path")
 
 classes = [
     ANIMPATH_PT_main_panel,

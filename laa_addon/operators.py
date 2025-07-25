@@ -2,11 +2,133 @@ import bpy
 from bpy.types import Operator
 from bpy.props import StringProperty, IntProperty, FloatVectorProperty, BoolProperty
 from mathutils import Vector
+from bpy.app.handlers import persistent
 
 try:
     from .animation_path import AnimationPath, create_animation_path_from_properties
 except ImportError:
     from animation_path import AnimationPath, create_animation_path_from_properties
+
+# Global variable to prevent infinite recursion during property updates
+_updating_properties = False
+
+def load_path_properties_from_object(context, path_obj):
+    """Load properties from a path object into the properties panel"""
+    global _updating_properties
+    if _updating_properties or not path_obj or not path_obj.get("is_animation_path"):
+        return
+    
+    _updating_properties = True
+    try:
+        props = context.scene.animation_path_props
+        
+        props.start_frame = path_obj.get("start_frame", 1)
+        props.end_frame = path_obj.get("end_frame", 100)
+        props.start_pose = path_obj.get("start_pose", "idle")
+        props.end_pose = path_obj.get("end_pose", "idle")
+        props.anim = path_obj.get("anim", "walk")
+        props.start_blend_frames = path_obj.get("start_blend_frames", 0)
+        props.end_blend_frames = path_obj.get("end_blend_frames", 0)
+        props.use_rotation = path_obj.get("use_rotation", True)
+        
+        target_obj_name = path_obj.get("target_object")
+        if target_obj_name:
+            target_obj = bpy.data.objects.get(target_obj_name)
+            if target_obj:
+                props.target_object = target_obj
+        else:
+            props.target_object = None
+        
+        # Load positions from control points
+        for point_type in ["start", "end"]:
+            point_name = path_obj.get(f"{point_type}_control_point")
+            if point_name:
+                point_obj = bpy.data.objects.get(point_name)
+                if point_obj:
+                    setattr(props, f"{point_type}_pos", point_obj.location)
+        
+        # Store reference to currently selected path
+        context.scene["_selected_animation_path"] = path_obj.name
+        
+    finally:
+        _updating_properties = False
+
+def update_path_from_properties(context):
+    """Update the selected path object from current properties"""
+    global _updating_properties
+    if _updating_properties:
+        return
+    
+    selected_path_name = context.scene.get("_selected_animation_path")
+    if not selected_path_name:
+        return
+    
+    path_obj = bpy.data.objects.get(selected_path_name)
+    if not path_obj or not path_obj.get("is_animation_path"):
+        return
+    
+    _updating_properties = True
+    try:
+        props = context.scene.animation_path_props
+        
+        # Create AnimationPath to validate properties
+        path = AnimationPath(
+            start_pos=props.start_pos,
+            start_frame=props.start_frame,
+            end_pos=props.end_pos,
+            end_frame=props.end_frame,
+            start_pose=props.start_pose,
+            end_pose=props.end_pose,
+            anim=props.anim,
+            start_blend_frames=props.start_blend_frames,
+            end_blend_frames=props.end_blend_frames
+        )
+        
+        # Update path object properties
+        path_obj["start_frame"] = path.start_frame
+        path_obj["end_frame"] = path.end_frame
+        path_obj["start_pose"] = path.start_pose
+        path_obj["end_pose"] = path.end_pose
+        path_obj["anim"] = path.anim
+        path_obj["start_blend_frames"] = path.start_blend_frames
+        path_obj["end_blend_frames"] = path.end_blend_frames
+        path_obj["use_rotation"] = props.use_rotation
+        
+        # **FIX: Update curve data's path_duration**
+        if path_obj.data and hasattr(path_obj.data, 'path_duration'):
+            path_obj.data.path_duration = path.duration
+            print(f"Updated path_duration to {path.duration} frames")
+        
+        if props.target_object:
+            path_obj["target_object"] = props.target_object.name
+        
+        # Update control point positions if they exist
+        for point_type in ["start", "end"]:
+            point_name = path_obj.get(f"{point_type}_control_point")
+            if point_name:
+                point_obj = bpy.data.objects.get(point_name)
+                if point_obj:
+                    new_pos = getattr(props, f"{point_type}_pos")
+                    point_obj.location = new_pos
+        
+        # Update curve geometry
+        path.update_curve_from_control_points(path_obj)
+        
+    except ValueError as e:
+        # If validation fails, revert to previous values
+        load_path_properties_from_object(context, path_obj)
+    finally:
+        _updating_properties = False
+
+@persistent
+def selection_changed_handler(scene, depsgraph):
+    """Handler called when selection changes"""
+    if not hasattr(bpy.context, 'active_object'):
+        return
+    
+    active_obj = bpy.context.active_object
+    if active_obj and active_obj.get("is_animation_path"):
+        load_path_properties_from_object(bpy.context, active_obj)
 
 class ANIMPATH_OT_set_start_position(Operator):
     """Set start position from 3D cursor"""
@@ -64,10 +186,6 @@ class ANIMPATH_OT_create_path(Operator):
                 curve_obj["target_object"] = props.target_object.name
                 curve_obj["use_rotation"] = props.use_rotation
             
-            # Set scene frame range to match animation path
-            context.scene.frame_start = path.start_frame
-            context.scene.frame_end = path.end_frame
-            
             bpy.ops.object.select_all(action='DESELECT')
             curve_obj.select_set(True)
             context.view_layer.objects.active = curve_obj
@@ -113,6 +231,13 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             end_frame = path_obj.get("end_frame", 100)
             use_rotation = path_obj.get("use_rotation", True)
             
+            # **FIX: Ensure curve data path_duration matches the frame range**
+            if path_obj.data and hasattr(path_obj.data, 'path_duration'):
+                new_duration = end_frame - start_frame
+                if path_obj.data.path_duration != new_duration:
+                    path_obj.data.path_duration = new_duration
+                    print(f"Updated curve path_duration to {new_duration} frames")
+            
             props = context.scene.animation_path_props
             if props.clear_existing_animation:
                 target_obj.animation_data_clear()
@@ -135,7 +260,7 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             context.scene.frame_set(start_frame)
             start_pos = self._get_control_point_position(path_obj, "start")
             if start_pos:
-                target_obj.location = start_pos
+                target_obj.location = (0,0,0)
                 target_obj.keyframe_insert(data_path="location", frame=start_frame)
                 if not use_rotation:
                     target_obj.keyframe_insert(data_path="rotation_euler", frame=start_frame)
@@ -144,10 +269,13 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             context.scene.frame_set(end_frame)
             end_pos = self._get_control_point_position(path_obj, "end")
             if end_pos:
-                target_obj.location = end_pos
+                target_obj.location = (0,0,0)
                 target_obj.keyframe_insert(data_path="location", frame=end_frame)
                 if not use_rotation:
                     target_obj.keyframe_insert(data_path="rotation_euler", frame=end_frame)
+
+            target_obj.location = end_pos
+            target_obj.keyframe_insert(data_path="location", frame=end_frame + 1)
 
             # Animate constraint offset
             follow_path.offset_factor = 0.0
@@ -282,6 +410,11 @@ class ANIMPATH_OT_update_path(Operator):
             obj["start_blend_frames"] = path.start_blend_frames
             obj["end_blend_frames"] = path.end_blend_frames
             
+            # **FIX: Update curve data's path_duration**
+            if obj.data and hasattr(obj.data, 'path_duration'):
+                obj.data.path_duration = path.duration
+                print(f"Updated path_duration to {path.duration} frames")
+            
             if props.target_object:
                 obj["target_object"] = props.target_object.name
             obj["use_rotation"] = props.use_rotation
@@ -311,15 +444,30 @@ class ANIMPATH_OT_delete_path(Operator):
             self.report({'ERROR'}, "No Animation Path selected")
             return {'CANCELLED'}
         
+        path_name = obj.name
+        objects_to_delete = []
+        curve_data_to_delete = []
+        
+        # Store the curve data for deletion
+        if obj.data and obj.data.users == 1:  # Only delete if no other objects use this data
+            curve_data_to_delete.append(obj.data)
+        
+        # Find parent empty and all related objects
         parent_empty_name = obj.get("laa_path_parent")
         parent_empty = bpy.data.objects.get(parent_empty_name) if parent_empty_name else None
-        path_name = obj.name
         
         if parent_empty:
-            bpy.data.objects.remove(parent_empty, do_unlink=True)
-            self.report({'INFO'}, f"Deleted Animation Path hierarchy: {path_name}")
+            # Collect all children of the parent empty (includes path and control points)
+            for child in parent_empty.children:
+                objects_to_delete.append(child)
+                # Store curve data for deletion if it's a curve object
+                if child.data and hasattr(child.data, 'splines') and child.data.users == 1:
+                    curve_data_to_delete.append(child.data)
+            
+            # Add the parent empty itself
+            objects_to_delete.append(parent_empty)
         else:
-            # Fallback cleanup
+            # Fallback: manually find and collect control points
             start_point_name = obj.get("start_control_point")
             end_point_name = obj.get("end_control_point")
             
@@ -327,11 +475,34 @@ class ANIMPATH_OT_delete_path(Operator):
                 if point_name:
                     point_obj = bpy.data.objects.get(point_name)
                     if point_obj:
-                        bpy.data.objects.remove(point_obj, do_unlink=True)
+                        objects_to_delete.append(point_obj)
             
-            bpy.data.objects.remove(obj, do_unlink=True)
-            self.report({'INFO'}, f"Deleted Animation Path: {path_name}")
+            # Add the path object itself
+            objects_to_delete.append(obj)
         
+        # Clear selection to avoid issues
+        bpy.ops.object.select_all(action='DESELECT')
+        
+        # Delete all objects
+        deleted_count = 0
+        for delete_obj in objects_to_delete:
+            if delete_obj and delete_obj.name in bpy.data.objects:
+                try:
+                    bpy.data.objects.remove(delete_obj, do_unlink=True)
+                    deleted_count += 1
+                except Exception as e:
+                    print(f"Warning: Could not delete object {delete_obj.name}: {e}")
+        
+        # Clear the selected path reference if it was this path
+        selected_path_name = context.scene.get("_selected_animation_path")
+        if selected_path_name == path_name:
+            if "_selected_animation_path" in context.scene:
+                del context.scene["_selected_animation_path"]
+        
+        # Update the viewport
+        context.view_layer.update()
+        
+        self.report({'INFO'}, f"Deleted Animation Path '{path_name}': {deleted_count} objects")
         return {'FINISHED'}
 
 class ANIMPATH_OT_load_path_to_properties(Operator):
@@ -455,8 +626,16 @@ def register():
                     print(f"Warning: Could not register class {cls.__name__}: {e}")
             else:
                 print(f"Error registering class {cls.__name__}: {e}")
+    
+    # Register the selection change handler
+    if selection_changed_handler not in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.append(selection_changed_handler)
 
 def unregister():
+    # Unregister the selection change handler
+    if selection_changed_handler in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(selection_changed_handler)
+    
     for cls in reversed(classes):
         try:
             bpy.utils.unregister_class(cls)
