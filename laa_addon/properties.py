@@ -104,9 +104,17 @@ class AnimationPathProperties(PropertyGroup):
     )
     
     use_rotation: BoolProperty(
-        name="Align to Path",
-        description="Rotate object to face the direction of movement",
+        name="Follow Curve Rotation",
+        description="The object will rotate along the curve facing the correct direction",
         default=True,
+        update=property_update_callback
+    )
+    
+    object_offset: FloatVectorProperty(
+        name="Object Offset",
+        description="XYZ offset of the object from the path",
+        default=(0.0, 0.0, 0.0),
+        subtype='TRANSLATION',
         update=property_update_callback
     )
     

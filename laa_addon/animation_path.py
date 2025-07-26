@@ -173,7 +173,7 @@ class AnimationPath:
         return control_points
 
     def update_curve_from_control_points(self, curve_obj):
-        """Update curve geometry from control point positions"""
+        """Update curve geometry from control point positions - ONLY call manually"""
         control_points = {}
         
         start_point_name = curve_obj.get("start_control_point")
@@ -199,6 +199,8 @@ class AnimationPath:
         end_pos = control_points.get("end", self.end_pos)
         direction = end_pos - start_pos
         
+        # **ONLY update curve geometry when explicitly called**
+        # This prevents automatic resetting to straight lines
         for i in range(5):
             t = i / 4.0
             if i == 0:
@@ -209,10 +211,26 @@ class AnimationPath:
                 pos = start_pos + direction * t
             spline.points[i].co = (pos.x, pos.y, pos.z, 1.0)
         
+        # Update internal positions only if control points moved
         if "start" in control_points:
             self.start_pos = control_points["start"]
         if "end" in control_points:
             self.end_pos = control_points["end"]
+    
+    def update_positions_from_control_points(self, curve_obj):
+        """Update internal positions from control points WITHOUT modifying curve geometry"""
+        start_point_name = curve_obj.get("start_control_point")
+        end_point_name = curve_obj.get("end_control_point")
+        
+        if start_point_name:
+            start_obj = bpy.data.objects.get(start_point_name)
+            if start_obj:
+                self.start_pos = start_obj.location.copy()
+        
+        if end_point_name:
+            end_obj = bpy.data.objects.get(end_point_name)
+            if end_obj:
+                self.end_pos = end_obj.location.copy()
     
     def get_position_from_curve(self, curve_obj, frame):
         """Get position along curve at specific frame"""
