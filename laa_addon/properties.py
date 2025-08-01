@@ -24,6 +24,37 @@ def property_update_callback(self, context):
         except:
             pass
 
+# Import animation library functions with safe fallbacks
+def get_available_poses(self, context):
+    """Get available poses for enum property with safe fallback"""
+    try:
+        from . import animation_library
+        return animation_library.get_available_poses(self, context)
+    except ImportError:
+        try:
+            import animation_library
+            return animation_library.get_available_poses(self, context)
+        except ImportError:
+            return [("NONE", "None", "No pose available", 'X', 0)]
+    except Exception as e:
+        print(f"Error getting poses: {e}")
+        return [("NONE", "None", "Error loading poses", 'ERROR', 0)]
+
+def get_available_animations(self, context):
+    """Get available animations for enum property with safe fallback"""
+    try:
+        from . import animation_library
+        return animation_library.get_available_animations(self, context)
+    except ImportError:
+        try:
+            import animation_library
+            return animation_library.get_available_animations(self, context)
+        except ImportError:
+            return [("NONE", "None", "No animation available", 'X', 0)]
+    except Exception as e:
+        print(f"Error getting animations: {e}")
+        return [("NONE", "None", "Error loading animations", 'ERROR', 0)]
+
 class AnimationPathProperties(PropertyGroup):
     """Properties for Animation Path creation and editing"""
     
@@ -59,24 +90,24 @@ class AnimationPathProperties(PropertyGroup):
         update=property_update_callback
     )
     
-    start_pose: StringProperty(
+    start_pose: EnumProperty(
         name="Start Pose",
         description="Initial animation state",
-        default="idle",
+        items=get_available_poses,
         update=property_update_callback
     )
     
-    end_pose: StringProperty(
+    end_pose: EnumProperty(
         name="End Pose",
         description="Final animation state",
-        default="idle",
+        items=get_available_poses,
         update=property_update_callback
     )
     
-    anim: StringProperty(
+    anim: EnumProperty(
         name="Main Animation",
         description="Main animation loop during the path",
-        default="walk",
+        items=get_available_animations,
         update=property_update_callback
     )
     

@@ -13,8 +13,17 @@ from mathutils import Vector
 
 try:
     from . import properties
+    from . import animation_library
+    animation_library_available = True
 except ImportError:
-    import properties
+    try:
+        import properties
+        import animation_library
+        animation_library_available = True
+    except ImportError:
+        import properties
+        animation_library_available = False
+        print("Animation library not available")
 
 class ANIMPATH_PT_main_panel(Panel):
     """Main Animation Path panel in 3D Viewport sidebar"""
@@ -107,6 +116,28 @@ class ANIMPATH_PT_animation_settings(Panel):
         col.prop(props, "anim")
         col.prop(props, "end_pose")
         
+        # Animation library info and refresh
+        box = layout.box()
+        box.label(text="Animation Library:", icon='BOOKMARKS')
+        
+        if animation_library_available:
+            try:
+                pose_count = len([item for item in animation_library.get_available_poses(None, context) 
+                                if not item[0].endswith('_MISSING') and item[0] != 'NONE'])
+                anim_count = len([item for item in animation_library.get_available_animations(None, context) 
+                                if not item[0].endswith('_MISSING') and item[0] != 'NONE'])
+                
+                row = box.row(align=True)
+                row.label(text=f"Poses: {pose_count}")
+                row.label(text=f"Animations: {anim_count}")
+                
+                box.operator("animpath.refresh_animation_library", text="Refresh Library", icon='FILE_REFRESH')
+                
+            except Exception as e:
+                box.label(text=f"Library error: {str(e)}", icon='ERROR')
+        else:
+            box.label(text="Animation library not available", icon='ERROR')
+        
         col.separator()
         col.label(text="Blend Settings:")
         col.prop(props, "start_blend_frames")
@@ -142,6 +173,12 @@ class ANIMPATH_PT_object_animation(Panel):
                     col = box.column(align=True)
                     col.label(text=f"Target: {target_obj.name}", icon='OBJECT_DATA')
                     
+                    # Check if target has an armature (for rig detection)
+                    has_armature = self._check_for_armature(target_obj)
+                    if has_armature:
+                        armature_name = self._get_armature_name(target_obj)
+                        col.label(text=f"Rig: {armature_name}", icon='ARMATURE_DATA')
+                    
                     col.separator()
                     
                     # Object offset controls
@@ -152,19 +189,33 @@ class ANIMPATH_PT_object_animation(Panel):
 
                     # Updated rotation checkbox with better description
                     col.prop(props, "use_rotation", text="Follow Curve Rotation")
-                    if props.use_rotation:
-                        col.label(text="✓ Object will rotate to follow curve", icon='INFO')
-                    else:
-                        col.label(text="○ Object maintains current rotation", icon='INFO')
 
                     col.separator()
                     
+                    # Main animation button
                     col.operator("animpath.animate_object_along_path", 
-                               text="Animate Object Along Path", icon='PLAY')
+                               text="Animate Object + Rig", icon='PLAY')
                     
                     start_frame = obj.get("start_frame", 1)
                     end_frame = obj.get("end_frame", 100)
                     col.label(text=f"Frames: {start_frame} - {end_frame}")
+                    
+                    # Show pose/animation info
+                    start_pose = obj.get("start_pose", "NONE")
+                    main_anim = obj.get("anim", "NONE")
+                    end_pose = obj.get("end_pose", "NONE")
+                    
+                    if start_pose != "NONE" or main_anim != "NONE" or end_pose != "NONE":
+                        col.separator()
+                        info_box = col.box()
+                        info_box.label(text="Rig Animation Preview:", icon='INFO')
+                        
+                        if start_pose != "NONE":
+                            info_box.label(text=f"Start: {start_pose}", icon='POSE_HLT')
+                        if main_anim != "NONE":
+                            info_box.label(text=f"Main: {main_anim}", icon='ANIM')
+                        if end_pose != "NONE":
+                            info_box.label(text=f"End: {end_pose}", icon='POSE_HLT')
                     
                 else:
                     box.label(text=f"⚠ Target object '{target_obj_name}' not found", icon='ERROR')
@@ -175,6 +226,56 @@ class ANIMPATH_PT_object_animation(Panel):
         else:
             layout.label(text="Select an Animation Path", icon='INFO')
             layout.label(text="to animate an object along it")
+    
+    def _check_for_armature(self, target_obj):
+        """Check if target object has an associated armature"""
+        # Check if target is an armature
+        if target_obj.type == 'ARMATURE':
+            return True
+        
+        # Check direct children for armature
+        for child in target_obj.children:
+            if child.type == 'ARMATURE':
+                return True
+        
+        # Check if target has an armature modifier pointing to an armature
+        if hasattr(target_obj, 'modifiers'):
+            for modifier in target_obj.modifiers:
+                if modifier.type == 'ARMATURE' and modifier.object:
+                    return True
+        
+        # Recursively check children's children (one level deep)
+        for child in target_obj.children:
+            for grandchild in child.children:
+                if grandchild.type == 'ARMATURE':
+                    return True
+        
+        return False
+    
+    def _get_armature_name(self, target_obj):
+        """Get the name of the associated armature"""
+        # Check if target is an armature
+        if target_obj.type == 'ARMATURE':
+            return target_obj.name
+        
+        # Check direct children for armature
+        for child in target_obj.children:
+            if child.type == 'ARMATURE':
+                return child.name
+        
+        # Check if target has an armature modifier pointing to an armature
+        if hasattr(target_obj, 'modifiers'):
+            for modifier in target_obj.modifiers:
+                if modifier.type == 'ARMATURE' and modifier.object:
+                    return modifier.object.name
+        
+        # Recursively check children's children (one level deep)
+        for child in target_obj.children:
+            for grandchild in child.children:
+                if grandchild.type == 'ARMATURE':
+                    return grandchild.name
+        
+        return "Unknown"
 
 class ANIMPATH_PT_edit_panel(Panel):
     """Edit existing paths panel"""
@@ -201,7 +302,6 @@ class ANIMPATH_PT_edit_panel(Panel):
             col.separator()
             col.label(text="Curve Editing:")
             col.operator("animpath.reset_curve_to_control_points", text="Reset Curve to Straight", icon='CURVE_BEZCURVE')
-            col.label(text="↑ Only resets when you click this", icon='INFO')
             
             col.separator()
             col.operator("animpath.delete_path", text="Delete Path", icon='TRASH')
