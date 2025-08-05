@@ -141,11 +141,10 @@ class AnimationPathProperties(PropertyGroup):
         update=property_update_callback
     )
     
-    object_offset: FloatVectorProperty(
-        name="Object Offset",
-        description="XYZ offset of the object from the path",
-        default=(0.0, 0.0, 0.0),
-        subtype='TRANSLATION',
+    object_z_offset: FloatProperty(
+        name="Object Z Offset",
+        description="Z offset of the object from the path",
+        default=0.0,
         update=property_update_callback
     )
     

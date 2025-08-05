@@ -121,8 +121,8 @@ class ANIMPATH_OT_show_path_info(Operator):
         
         info_lines.append(f"Use Rotation: {obj.get('use_rotation', True)}")
         
-        object_offset = obj.get("object_offset", (0.0, 0.0, 0.0))
-        info_lines.append(f"Object Offset: ({object_offset[0]:.3f}, {object_offset[1]:.3f}, {object_offset[2]:.3f})")
+        object_z_offset = obj.get("object_z_offset", 0.0)
+        info_lines.append(f"Object Z Offset: {object_z_offset:.3f}")
         
         # Check for control points
         start_point_name = obj.get("start_control_point")

@@ -182,8 +182,8 @@ class ANIMPATH_PT_object_animation(Panel):
                     col.separator()
                     
                     # Object offset controls
-                    col.label(text="Object Offset from Path:", icon='TRANSFORM_ORIGINS')
-                    col.prop(props, "object_offset", text="")
+                    col.label(text="Object Z Offset from Path:", icon='TRANSFORM_ORIGINS')
+                    col.prop(props, "object_z_offset", text="")
                     
                     col.separator()
 

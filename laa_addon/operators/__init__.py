@@ -32,10 +32,7 @@ def load_path_properties_from_object(context, path_obj):
         props.start_blend_frames = path_obj.get("start_blend_frames", 0)
         props.end_blend_frames = path_obj.get("end_blend_frames", 0)
         props.use_rotation = path_obj.get("use_rotation", True)
-        
-        # Load object offset
-        object_offset = path_obj.get("object_offset", (0.0, 0.0, 0.0))
-        props.object_offset = Vector(object_offset)
+        props.object_z_offset = path_obj.get("object_z_offset", 0.0)
         
         target_obj_name = path_obj.get("target_object")
         if target_obj_name:
@@ -106,7 +103,7 @@ def update_path_from_properties(context):
         path_obj["start_blend_frames"] = path.start_blend_frames
         path_obj["end_blend_frames"] = path.end_blend_frames
         path_obj["use_rotation"] = props.use_rotation
-        path_obj["object_offset"] = tuple(props.object_offset)
+        path_obj["object_z_offset"] = props.object_z_offset
         
         # Update curve data's path_duration
         if path_obj.data and hasattr(path_obj.data, 'path_duration'):

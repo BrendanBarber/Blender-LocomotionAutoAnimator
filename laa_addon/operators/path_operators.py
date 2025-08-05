@@ -67,7 +67,7 @@ class ANIMPATH_OT_create_path(Operator):
             if props.target_object:
                 curve_obj["target_object"] = props.target_object.name
                 curve_obj["use_rotation"] = props.use_rotation
-                curve_obj["object_offset"] = tuple(props.object_offset)
+                curve_obj["object_z_offset"] = props.object_z_offset
             
             bpy.ops.object.select_all(action='DESELECT')
             curve_obj.select_set(True)
@@ -121,7 +121,7 @@ class ANIMPATH_OT_update_path(Operator):
             obj["anim"] = path.anim
             obj["start_blend_frames"] = path.start_blend_frames
             obj["end_blend_frames"] = path.end_blend_frames
-            obj["object_offset"] = tuple(props.object_offset)
+            obj["object_z_offset"] = props.object_z_offset
             
             # Update curve data's path_duration
             if obj.data and hasattr(obj.data, 'path_duration'):
@@ -150,7 +150,7 @@ class ANIMPATH_OT_update_path(Operator):
         return {'FINISHED'}
 
 class ANIMPATH_OT_delete_path(Operator):
-    """Delete selected Animation Path and its control points"""
+    """Delete selected Animation Path and its control points, keyframes, and NLA strips"""
     bl_idname = "animpath.delete_path"
     bl_label = "Delete Animation Path"
     bl_options = {'REGISTER', 'UNDO'}
@@ -165,6 +165,11 @@ class ANIMPATH_OT_delete_path(Operator):
         path_name = obj.name
         objects_to_delete = []
         curve_data_to_delete = []
+        
+        # Clean up animation data before deleting path objects
+        cleanup_success = self._cleanup_animation_data(obj, context)
+        if cleanup_success:
+            self.report({'INFO'}, f"Cleaned up animation data for path: {path_name}")
         
         # Store the curve data for deletion
         if obj.data and obj.data.users == 1:  # Only delete if no other objects use this data
@@ -225,8 +230,180 @@ class ANIMPATH_OT_delete_path(Operator):
         # Update the viewport
         context.view_layer.update()
         
-        self.report({'INFO'}, f"Deleted Animation Path '{path_name}': {deleted_count} objects")
+        self.report({'INFO'}, f"Deleted Animation Path '{path_name}': {deleted_count} objects and associated animation data")
         return {'FINISHED'}
+    
+    def _cleanup_animation_data(self, path_obj, context):
+        """Clean up animation data (keyframes and NLA strips) created by this path"""
+        try:
+            path_name = path_obj.name
+            target_obj_name = path_obj.get("target_object")
+            
+            if not target_obj_name:
+                print(f"No target object found for path {path_name}")
+                return False
+            
+            target_obj = bpy.data.objects.get(target_obj_name)
+            if not target_obj:
+                print(f"Target object '{target_obj_name}' not found")
+                return False
+            
+            cleanup_performed = False
+            
+            # Clean up target object animation data
+            cleanup_performed |= self._cleanup_object_animation(target_obj, path_name, path_obj)
+            
+            # Find and clean up armature animation data
+            armature_obj = self._find_armature(target_obj)
+            if armature_obj and armature_obj != target_obj:
+                cleanup_performed |= self._cleanup_armature_animation(armature_obj, path_name)
+            elif armature_obj == target_obj:
+                # If target is the armature, clean up NLA strips but preserve any follow path keyframes
+                cleanup_performed |= self._cleanup_armature_animation(armature_obj, path_name)
+            
+            return cleanup_performed
+            
+        except Exception as e:
+            print(f"Error cleaning up animation data: {e}")
+            return False
+    
+    def _cleanup_object_animation(self, target_obj, path_name, path_obj):
+        """Clean up Follow Path constraints and related keyframes"""
+        cleanup_performed = False
+        
+        try:
+            # Get frame range from path object
+            start_frame = path_obj.get("start_frame", 1)
+            end_frame = path_obj.get("end_frame", 100)
+            
+            # First, clean up keyframes before removing constraints
+            if target_obj.animation_data and target_obj.animation_data.action:
+                action = target_obj.animation_data.action
+                fcurves_to_remove = []
+                
+                # Find fcurves related to Follow Path constraint
+                for fcurve in action.fcurves:
+                    try:
+                        # Remove constraint-related keyframes
+                        if (fcurve.data_path.startswith('constraints[') and 
+                            ('offset_factor' in fcurve.data_path or 'influence' in fcurve.data_path)):
+                            # Check if this fcurve belongs to our constraint
+                            if f'FollowPath_{path_name}' in fcurve.data_path:
+                                fcurves_to_remove.append(fcurve)
+                        
+                        # Remove location/rotation keyframes within the path's frame range
+                        elif fcurve.data_path in ['location', 'rotation_euler', 'rotation_quaternion']:
+                            # Check if keyframes exist in the path's frame range
+                            keyframes_in_range = [kf for kf in fcurve.keyframe_points 
+                                                if start_frame <= kf.co[0] <= end_frame + 1]
+                            
+                            if keyframes_in_range and len(keyframes_in_range) == len(fcurve.keyframe_points):
+                                # If ALL keyframes are in the path range, it's likely a path animation
+                                fcurves_to_remove.append(fcurve)
+                            elif keyframes_in_range:
+                                # Remove only keyframes in the path range
+                                for kf in reversed(keyframes_in_range):
+                                    fcurve.keyframe_points.remove(kf, fast=True)
+                                cleanup_performed = True
+                    
+                    except (AttributeError, ReferenceError):
+                        # FCurve or its data may have been invalidated
+                        continue
+                
+                # Remove the identified fcurves
+                for fcurve in fcurves_to_remove:
+                    try:
+                        action.fcurves.remove(fcurve)
+                        cleanup_performed = True
+                        print(f"Removed fcurve: {fcurve.data_path}")
+                    except (AttributeError, ReferenceError):
+                        # FCurve may have been invalidated
+                        continue
+            
+            # Now remove Follow Path constraints created by this path
+            constraints_to_remove = []
+            if hasattr(target_obj, 'constraints'):
+                for constraint in target_obj.constraints:
+                    try:
+                        if (constraint.type == 'FOLLOW_PATH' and 
+                            constraint.name == f"FollowPath_{path_name}"):
+                            constraints_to_remove.append(constraint)
+                    except (AttributeError, ReferenceError):
+                        # Constraint may have been invalidated
+                        continue
+            
+            for constraint in constraints_to_remove:
+                try:
+                    constraint_name = constraint.name  # Store name before removal
+                    target_obj.constraints.remove(constraint)
+                    cleanup_performed = True
+                    print(f"Removed Follow Path constraint: {constraint_name}")
+                except (AttributeError, ReferenceError):
+                    # Constraint may have been invalidated
+                    continue
+        
+        except Exception as e:
+            print(f"Error during object animation cleanup: {e}")
+        
+        return cleanup_performed
+    
+    def _cleanup_armature_animation(self, armature_obj, path_name):
+        """Clean up NLA strips and tracks created by this path"""
+        cleanup_performed = False
+        
+        try:
+            if not armature_obj.animation_data:
+                return False
+            
+            # Remove NLA tracks created by this path
+            tracks_to_remove = []
+            for track in armature_obj.animation_data.nla_tracks:
+                try:
+                    if track.name.startswith(f"LAA_{path_name}"):
+                        tracks_to_remove.append(track)
+                except (AttributeError, ReferenceError):
+                    # Track may have been invalidated
+                    continue
+            
+            for track in tracks_to_remove:
+                try:
+                    track_name = track.name  # Store name before removal
+                    armature_obj.animation_data.nla_tracks.remove(track)
+                    cleanup_performed = True
+                    print(f"Removed NLA track: {track_name}")
+                except (AttributeError, ReferenceError):
+                    # Track may have been invalidated
+                    continue
+        
+        except Exception as e:
+            print(f"Error during armature animation cleanup: {e}")
+        
+        return cleanup_performed
+    
+    def _find_armature(self, target_obj):
+        """Find an armature object - either the target itself or its child"""
+        # Check if target is an armature
+        if target_obj.type == 'ARMATURE':
+            return target_obj
+        
+        # Check direct children for armature
+        for child in target_obj.children:
+            if child.type == 'ARMATURE':
+                return child
+        
+        # Check if target has an armature modifier pointing to an armature
+        if hasattr(target_obj, 'modifiers'):
+            for modifier in target_obj.modifiers:
+                if modifier.type == 'ARMATURE' and modifier.object:
+                    return modifier.object
+        
+        # Recursively check children's children (one level deep)
+        for child in target_obj.children:
+            for grandchild in child.children:
+                if grandchild.type == 'ARMATURE':
+                    return grandchild
+        
+        return None
 
 class ANIMPATH_OT_load_path_to_properties(Operator):
     """Load selected Animation Path data to properties panel"""
@@ -251,7 +428,7 @@ class ANIMPATH_OT_load_path_to_properties(Operator):
         props.start_blend_frames = obj.get("start_blend_frames", 0)
         props.end_blend_frames = obj.get("end_blend_frames", 0)
         props.use_rotation = obj.get("use_rotation", True)
-        props.object_offset = Vector(obj.get("object_offset", (0.0, 0.0, 0.0)))
+        props.object_z_offset = obj.get("object_z_offset", 0.0)
         
         target_obj_name = obj.get("target_object")
         if target_obj_name:

@@ -40,7 +40,10 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             start_frame = path_obj.get("start_frame", 1)
             end_frame = path_obj.get("end_frame", 100)
             use_rotation = path_obj.get("use_rotation", True)
-            object_offset = Vector(path_obj.get("object_offset", (0.0, 0.0, 0.0)))
+            object_z_offset = path_obj.get("object_z_offset", 0.0)
+            
+            # Create offset vector from Z offset only
+            object_offset = Vector((0.0, 0.0, object_z_offset))
             
             # Get pose and animation settings
             start_pose = path_obj.get("start_pose", "NONE")
@@ -172,7 +175,8 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             context.scene.frame_set(start_frame)
             
             rotation_info = "with curve rotation" if (use_rotation and follow_path.use_curve_follow) else "without rotation"
-            self.report({'INFO'}, f"Added Follow Path animation to {target_obj.name} from frame {start_frame} to {end_frame} {rotation_info}")
+            offset_info = f" with Z offset {object_z_offset}" if object_z_offset != 0.0 else ""
+            self.report({'INFO'}, f"Added Follow Path animation to {target_obj.name} from frame {start_frame} to {end_frame} {rotation_info}{offset_info}")
             
         except Exception as e:
             self.report({'ERROR'}, f"Error setting up path animation: {str(e)}")
