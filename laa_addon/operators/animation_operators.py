@@ -128,14 +128,39 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
 
                 context.scene.frame_set(end_frame + 1)
                 animation_target.rotation_euler = final_rotation
-                animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame + 1)
+                animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame + 1)\
+
+            # Use Fixed Location for speed control
+            follow_path.use_fixed_location = True
 
             # Animate constraint offset
             follow_path.offset_factor = 0.0
             follow_path.keyframe_insert(data_path="offset_factor", frame=start_frame)
+
             follow_path.offset_factor = 1.0
             follow_path.keyframe_insert(data_path="offset_factor", frame=end_frame)
-            
+
+            action = target_obj.animation_data.action
+            fcurve = action.fcurves.find("constraints[\"FollowPath_AnimationPath\"].offset_factor")
+
+            if fcurve:
+                # Set both keyframes to bezier
+                fcurve.keyframe_points[0].interpolation = 'BEZIER'
+                fcurve.keyframe_points[1].interpolation = 'BEZIER'
+                
+                # Set handle types to free so we can manually position them
+                fcurve.keyframe_points[0].handle_right_type = 'FREE'
+                fcurve.keyframe_points[1].handle_left_type = 'FREE'
+                
+                # Position the handles based on blend times
+                # Right handle of start keyframe
+                blend_in_frame = start_frame + start_blend_frames
+                fcurve.keyframe_points[0].handle_right = (blend_in_frame, 0.0)
+                
+                # Left handle of end keyframe  
+                blend_out_frame = end_frame - end_blend_frames
+                fcurve.keyframe_points[1].handle_left = (blend_out_frame, 1.0)
+
             # Control constraint influence
             follow_path.influence = 1.0
             follow_path.keyframe_insert(data_path="influence", frame=start_frame)
@@ -147,13 +172,10 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             # Set interpolation for path animation
             if animation_target.animation_data and animation_target.animation_data.action:
                 for fcurve in animation_target.animation_data.action.fcurves:
-                    if fcurve.data_path.endswith("offset_factor"):
-                        for keyframe in fcurve.keyframe_points:
-                            keyframe.interpolation = 'LINEAR'
-                    elif fcurve.data_path.endswith("influence"):
+                    if fcurve.data_path.endswith("influence"):
                         for keyframe in fcurve.keyframe_points:
                             keyframe.interpolation = 'CONSTANT'
-            
+        
             context.view_layer.update()
 
             # Only select if object is in current view layer
