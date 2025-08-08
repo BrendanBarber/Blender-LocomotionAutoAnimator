@@ -3,9 +3,208 @@ Animation-related operators for path following and object animation with pose/an
 """
 
 import bpy
+import bmesh
 import math
 from mathutils import Vector
 from bpy.types import Operator
+
+def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_frame, 
+                        min_speed_factor=0.5, 
+                        max_speed_factor=1.0,
+                        num_samples=100):
+    """
+    Apply curvature-based speed control to a Follow Path constraint.
+    Slows down on sharp curves, speeds up on straight sections.
+    """
+    try:
+        # Get curve mesh representation for accurate sampling
+        context = bpy.context
+        depsgraph = context.evaluated_depsgraph_get()
+        curve_eval = curve_obj.evaluated_get(depsgraph)
+        
+        # Convert curve to mesh to sample the actual geometry
+        mesh = curve_eval.to_mesh()
+        if not mesh.vertices or len(mesh.vertices) < 3:
+            curve_eval.to_mesh_clear()
+            return False
+        
+        # Sample positions along the curve
+        positions = []
+        for i in range(num_samples):
+            t = i / (num_samples - 1)
+            pos = sample_mesh_at_parameter(mesh, t)
+            positions.append(pos)
+        
+        # Clean up mesh
+        curve_eval.to_mesh_clear()
+        
+        # Calculate curvature at each sample point
+        curvatures = []
+        for i in range(1, len(positions) - 1):
+            prev_pos = positions[i-1]
+            curr_pos = positions[i]
+            next_pos = positions[i+1]
+            
+            # Calculate tangent vectors
+            v1 = (curr_pos - prev_pos).normalized()
+            v2 = (next_pos - curr_pos).normalized()
+            
+            # Calculate curvature as the rate of change of tangent direction
+            if v1.length > 0.001 and v2.length > 0.001:
+                # Angle between consecutive tangent vectors
+                dot_product = max(-1.0, min(1.0, v1.dot(v2)))
+                angle_change = math.acos(dot_product)
+                
+                # Normalize by segment length for curvature
+                segment_length = (next_pos - prev_pos).length
+                curvature = angle_change / max(segment_length, 0.001)
+            else:
+                curvature = 0.0
+            
+            curvatures.append(curvature)
+        
+        # Handle edge cases (first and last points)
+        if curvatures:
+            curvatures.insert(0, curvatures[0])
+            curvatures.append(curvatures[-1])
+        else:
+            return False
+        
+        # Convert curvatures to speed weights
+        max_curvature = max(curvatures) if curvatures else 1.0
+        speed_weights = []
+        
+        for curvature in curvatures:
+            if max_curvature > 0:
+                # Normalize curvature (0 to 1)
+                norm_curvature = curvature / max_curvature
+                # Convert to speed factor (high curvature = low speed)
+                speed_factor = max_speed_factor - (norm_curvature * (max_speed_factor - min_speed_factor))
+            else:
+                speed_factor = max_speed_factor
+            
+            # Weight is inverse of speed (more time needed for slow sections)
+            weight = 1.0 / max(speed_factor, 0.1)
+            speed_weights.append(weight)
+        
+        # Build cumulative time distribution
+        cumulative_weights = []
+        total_weight = 0.0
+        for weight in speed_weights:
+            total_weight += weight
+            cumulative_weights.append(total_weight)
+        
+        # Normalize to [0, 1]
+        if total_weight > 0:
+            cumulative_weights = [w / total_weight for w in cumulative_weights]
+        
+        # Determine keyframe positions based on curvature variation
+        keyframe_data = find_keyframe_positions(curvatures, cumulative_weights)
+        
+        # Clear existing offset keyframes and set up basic animation
+        follow_path_constraint.offset_factor = 0.0
+        follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=start_frame)
+        follow_path_constraint.offset_factor = 1.0
+        follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=end_frame)
+        
+        # Add intermediate keyframes based on curvature analysis
+        total_frames = end_frame - start_frame
+        for keyframe_info in keyframe_data:
+            curve_param = keyframe_info['curve_parameter']
+            time_factor = keyframe_info['time_factor']
+            
+            frame_time = start_frame + (time_factor * total_frames)
+            follow_path_constraint.offset_factor = curve_param
+            follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=frame_time)
+        
+        # Set interpolation to linear for predictable timing
+        if follow_path_constraint.id_data.animation_data and follow_path_constraint.id_data.animation_data.action:
+            action = follow_path_constraint.id_data.animation_data.action
+            fcurve = action.fcurves.find(f'constraints["{follow_path_constraint.name}"].offset_factor')
+            if fcurve:
+                for keyframe in fcurve.keyframe_points:
+                    keyframe.interpolation = 'LINEAR'
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error in apply_speed_control: {e}")
+        return False
+
+
+def sample_mesh_at_parameter(mesh, t):
+    """Sample a position along the mesh at parameter t (0 to 1)"""
+    if not mesh.edges:
+        return Vector((0, 0, 0))
+    
+    # Calculate total edge length
+    total_length = 0.0
+    edge_lengths = []
+    for edge in mesh.edges:
+        v1 = mesh.vertices[edge.vertices[0]].co
+        v2 = mesh.vertices[edge.vertices[1]].co
+        length = (v2 - v1).length
+        edge_lengths.append(length)
+        total_length += length
+    
+    if total_length == 0:
+        return Vector((0, 0, 0))
+    
+    # Find position at parameter t
+    target_length = t * total_length
+    current_length = 0.0
+    
+    for i, edge in enumerate(mesh.edges):
+        edge_length = edge_lengths[i]
+        if current_length + edge_length >= target_length:
+            # Interpolate within this edge
+            local_t = (target_length - current_length) / edge_length if edge_length > 0 else 0
+            v1 = mesh.vertices[edge.vertices[0]].co
+            v2 = mesh.vertices[edge.vertices[1]].co
+            return v1.lerp(v2, local_t)
+        current_length += edge_length
+    
+    # Fallback to last vertex
+    return mesh.vertices[-1].co
+
+
+def find_keyframe_positions(curvatures, cumulative_weights):
+    """Find optimal keyframe positions based on curvature changes"""
+    keyframes = []
+    
+    # Look for significant curvature changes
+    if len(curvatures) < 5:
+        return keyframes
+    
+    # Calculate curvature change rate
+    curvature_changes = []
+    for i in range(1, len(curvatures)):
+        change = abs(curvatures[i] - curvatures[i-1])
+        curvature_changes.append(change)
+    
+    # Find peaks in curvature change (areas where speed should transition)
+    avg_change = sum(curvature_changes) / len(curvature_changes) if curvature_changes else 0
+    threshold = avg_change * 1.5  # Adaptive threshold
+    
+    # Minimum distance between keyframes (prevent clustering)
+    min_separation = max(5, len(curvatures) // 20)
+    last_keyframe_index = -min_separation
+    
+    for i, change in enumerate(curvature_changes):
+        if change > threshold and (i - last_keyframe_index) >= min_separation:
+            # Don't place keyframes too close to start/end
+            if i > 5 and i < len(curvatures) - 5:
+                curve_param = i / (len(curvatures) - 1)
+                time_factor = cumulative_weights[i]
+                
+                keyframes.append({
+                    'curve_parameter': curve_param,
+                    'time_factor': time_factor
+                })
+                last_keyframe_index = i
+    
+    return keyframes
+
 
 class ANIMPATH_OT_animate_object_along_path(Operator):
     """Animate the assigned object along the selected path using Follow Path constraint and apply poses/animations"""
@@ -134,32 +333,30 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             follow_path.use_fixed_location = True
 
             # Animate constraint offset
-            follow_path.offset_factor = 0.0
-            follow_path.keyframe_insert(data_path="offset_factor", frame=start_frame)
+            props = context.scene.animation_path_props
+            use_curvature = props.use_curvature_control
 
-            follow_path.offset_factor = 1.0
-            follow_path.keyframe_insert(data_path="offset_factor", frame=end_frame)
-
-            action = target_obj.animation_data.action
-            fcurve = action.fcurves.find("constraints[\"FollowPath_AnimationPath\"].offset_factor")
-
-            if fcurve:
-                # Set both keyframes to bezier
-                fcurve.keyframe_points[0].interpolation = 'BEZIER'
-                fcurve.keyframe_points[1].interpolation = 'BEZIER'
+            if use_curvature:
+                # Use curvature-based speed control
+                success = apply_speed_control(
+                    follow_path, path_obj, start_frame, end_frame,
+                    min_speed_factor=props.min_speed_factor, 
+                    max_speed_factor=props.max_speed_factor,
+                    num_samples=props.curvature_samples,
+                )
                 
-                # Set handle types to free so we can manually position them
-                fcurve.keyframe_points[0].handle_right_type = 'FREE'
-                fcurve.keyframe_points[1].handle_left_type = 'FREE'
-                
-                # Position the handles based on blend times
-                # Right handle of start keyframe
-                blend_in_frame = start_frame + start_blend_frames
-                fcurve.keyframe_points[0].handle_right = (blend_in_frame, 0.0)
-                
-                # Left handle of end keyframe  
-                blend_out_frame = end_frame - end_blend_frames
-                fcurve.keyframe_points[1].handle_left = (blend_out_frame, 1.0)
+                if success:
+                    speed_info = f"with curvature control ({props.min_speed_factor:.1f}x-{props.max_speed_factor:.1f}x)"
+                else:
+                    # Fallback to traditional method if curvature control fails
+                    self._apply_traditional_speed_control(follow_path, start_frame, end_frame, 
+                                                        start_blend_frames, end_blend_frames)
+                    speed_info = "with bezier ease (curvature fallback)"
+            else:
+                # Use traditional bezier speed control (your original method)
+                self._apply_traditional_speed_control(follow_path, start_frame, end_frame, 
+                                                    start_blend_frames, end_blend_frames)
+                speed_info = "with bezier ease in/out"
 
             # Control constraint influence
             follow_path.influence = 1.0
@@ -184,10 +381,12 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 animation_target.select_set(True)
                 context.view_layer.objects.active = animation_target
 
-                bpy.ops.constraint.followpath_path_animate(
-                    constraint=follow_path.name,
-                    owner='OBJECT'
-                )
+                # If there is not dynamic speed on the curves, just animate the default follow path
+                if not use_curvature:
+                    bpy.ops.constraint.followpath_path_animate(
+                        constraint=follow_path.name,
+                        owner='OBJECT'
+                    )
             
             # Apply poses and animations to rig (if target is an armature or has an armature child)
             self._apply_rig_animations(target_obj, path_obj, start_frame, end_frame,
@@ -198,13 +397,46 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             
             rotation_info = "with curve rotation" if (use_rotation and follow_path.use_curve_follow) else "without rotation"
             offset_info = f" with Z offset {object_z_offset}" if object_z_offset != 0.0 else ""
-            self.report({'INFO'}, f"Added Follow Path animation to {target_obj.name} from frame {start_frame} to {end_frame} {rotation_info}{offset_info}")
+            self.report({'INFO'}, 
+                       f"Added Follow Path animation to {target_obj.name} from frame {start_frame} to {end_frame} "
+                       f"{rotation_info}{offset_info} {speed_info}")
             
         except Exception as e:
             self.report({'ERROR'}, f"Error setting up path animation: {str(e)}")
             return {'CANCELLED'}
         
         return {'FINISHED'}
+
+    def _apply_traditional_speed_control(self, follow_path, start_frame, end_frame, 
+                                           start_blend_frames, end_blend_frames):
+            """Apply your original bezier-based speed control"""
+            # Animate constraint offset (your original code)
+            follow_path.offset_factor = 0.0
+            follow_path.keyframe_insert(data_path="offset_factor", frame=start_frame)
+
+            follow_path.offset_factor = 1.0
+            follow_path.keyframe_insert(data_path="offset_factor", frame=end_frame)
+
+            action = follow_path.id_data.animation_data.action
+            fcurve = action.fcurves.find(f"constraints[\"{follow_path.name}\"].offset_factor")
+
+            if fcurve:
+                # Set both keyframes to bezier
+                fcurve.keyframe_points[0].interpolation = 'BEZIER'
+                fcurve.keyframe_points[1].interpolation = 'BEZIER'
+                
+                # Set handle types to free so we can manually position them
+                fcurve.keyframe_points[0].handle_right_type = 'FREE'
+                fcurve.keyframe_points[1].handle_left_type = 'FREE'
+                
+                # Position the handles based on blend times
+                # Right handle of start keyframe
+                blend_in_frame = start_frame + start_blend_frames
+                fcurve.keyframe_points[0].handle_right = (blend_in_frame, 0.0)
+                
+                # Left handle of end keyframe  
+                blend_out_frame = end_frame - end_blend_frames
+                fcurve.keyframe_points[1].handle_left = (blend_out_frame, 1.0)
     
     def _apply_rig_animations(self, target_obj, path_obj, start_frame, end_frame,
                              start_pose, end_pose, main_anim, start_blend_frames, end_blend_frames):

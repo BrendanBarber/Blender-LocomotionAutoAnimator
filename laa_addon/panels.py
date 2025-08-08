@@ -148,6 +148,7 @@ class ANIMPATH_PT_animation_settings(Panel):
         if total_blend > total_frames:
             col.label(text="⚠ Blend frames exceed path duration", icon='ERROR')
 
+
 class ANIMPATH_PT_object_animation(Panel):
     """Object animation panel"""
     bl_label = "Object Animation"
@@ -277,6 +278,54 @@ class ANIMPATH_PT_object_animation(Panel):
         
         return "Unknown"
 
+
+class ANIMPATH_PT_curvature_control(Panel):
+    """Curvature-based speed control panel"""
+    bl_label = "Curvature Speed Control"
+    bl_idname = "ANIMPATH_PT_curvature_control"
+    bl_parent_id = "ANIMPATH_PT_object_animation"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_options = {'DEFAULT_CLOSED'}
+    
+    def draw_header(self, context):
+        props = context.scene.animation_path_props
+        self.layout.prop(props, "use_curvature_control", text="")
+    
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.animation_path_props
+        
+        # Only show settings if curvature control is enabled
+        layout.enabled = props.use_curvature_control
+        
+        if props.use_curvature_control:
+            col = layout.column(align=True)
+            col.label(text="Speed Range:", icon='DRIVER')
+            
+            row = col.row(align=True)
+            row.prop(props, "min_speed_factor", text="Curves")
+            row.prop(props, "max_speed_factor", text="Straights")
+            
+            col.separator()
+            
+            col.label(text="Analysis Settings:", icon='SETTINGS')
+            col.prop(props, "curvature_sensitivity", text="Sensitivity")
+            col.prop(props, "curvature_samples", text="Samples")
+            
+            # Show speed range preview
+            if props.min_speed_factor > 0:
+                speed_range = props.max_speed_factor / props.min_speed_factor
+                col.separator()
+                info_box = col.box()
+                info_box.label(text=f"Speed Variation: {speed_range:.1f}x", icon='INFO')
+                info_box.label(text=f"Curves: {props.min_speed_factor*100:.0f}% speed")
+                info_box.label(text=f"Straights: {props.max_speed_factor*100:.0f}% speed")
+        else:
+            col = layout.column()
+            col.label(text="Automatically adjusts speed based on", icon='INFO')
+            col.label(text="curve tightness for realistic motion")
+
 class ANIMPATH_PT_edit_panel(Panel):
     """Edit existing paths panel"""
     bl_label = "Manual Controls"
@@ -314,6 +363,7 @@ classes = [
     ANIMPATH_PT_main_panel,
     ANIMPATH_PT_animation_settings,
     ANIMPATH_PT_object_animation,
+    ANIMPATH_PT_curvature_control,
     ANIMPATH_PT_edit_panel,
 ]
 
