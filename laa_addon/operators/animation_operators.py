@@ -8,16 +8,27 @@ import math
 from mathutils import Vector
 from bpy.types import Operator
 
+
 def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_frame, 
                         min_speed_factor=0.5, 
                         max_speed_factor=1.0,
-                        num_samples=100):
+                        curvature_threshold=0.001):
     """
     Apply curvature-based speed control to a Follow Path constraint.
     Slows down on sharp curves, speeds up on straight sections.
+    
+    curvature_threshold: Minimum curvature value to consider. Lower values are treated as 0.0 (straight).
     """
     try:
-        # Get curve mesh representation for accurate sampling
+        import bmesh
+        import mathutils
+        import math
+        
+        total_frames = end_frame - start_frame
+        if total_frames <= 0:
+            return False
+            
+        # Get curve mesh representation for sampling
         context = bpy.context
         depsgraph = context.evaluated_depsgraph_get()
         curve_eval = curve_obj.evaluated_get(depsgraph)
@@ -27,39 +38,64 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         if not mesh.vertices or len(mesh.vertices) < 3:
             curve_eval.to_mesh_clear()
             return False
-        
-        # Sample positions along the curve
+
+        # Increase resolution for sampling.
+        original_resolution = curve_obj.data.resolution_u
+        original_render_resolution = curve_obj.data.render_resolution_u
+
+        curve_obj.data.resolution_u = 64
+        curve_obj.data.render_resolution_u = 64
+
         positions = []
-        for i in range(num_samples):
-            t = i / (num_samples - 1)
-            pos = sample_mesh_at_parameter(mesh, t)
-            positions.append(pos)
-        
-        # Clean up mesh
+        mesh = curve_eval.to_mesh()
+        for v in mesh.vertices:
+            positions.append(curve_obj.matrix_world @ v.co)
+
         curve_eval.to_mesh_clear()
-        
-        # Calculate curvature at each sample point
+
+        # Calculate curvature at each point along the curve mesh
         curvatures = []
-        for i in range(1, len(positions) - 1):
-            prev_pos = positions[i-1]
-            curr_pos = positions[i]
-            next_pos = positions[i+1]
+        
+        # FIXED: Correct curvature calculation
+        step = 4
+        for i in range(step, len(positions) - step):
+            p1 = positions[i - step]
+            p2 = positions[i]
+            p3 = positions[i + step]
             
-            # Calculate tangent vectors
-            v1 = (curr_pos - prev_pos).normalized()
-            v2 = (next_pos - curr_pos).normalized()
+            # Calculate vectors from current point to neighbors
+            v1 = (p1 - p2).normalized()  # Vector pointing backward
+            v2 = (p3 - p2).normalized()  # Vector pointing forward
             
-            # Calculate curvature as the rate of change of tangent direction
-            if v1.length > 0.001 and v2.length > 0.001:
-                # Angle between consecutive tangent vectors
-                dot_product = max(-1.0, min(1.0, v1.dot(v2)))
-                angle_change = math.acos(dot_product)
-                
-                # Normalize by segment length for curvature
-                segment_length = (next_pos - prev_pos).length
-                curvature = angle_change / max(segment_length, 0.001)
-            else:
+            # Calculate the angle between the vectors
+            # The dot product gives us cos(angle)
+            dot_product = v1.dot(v2)
+            # Clamp to avoid numerical errors with acos
+            dot_product = max(-1.0, min(1.0, dot_product))
+            
+            # The angle between the vectors (in radians)
+            angle = math.acos(dot_product)
+            
+            # FIXED: Use deviation from 90° as curvature measure
+            # Based on your data, 90° turn angle = straight sections
+            # Points farther from 90° = more curved sections
+            turn_angle = math.pi - angle
+            turn_angle_degrees = math.degrees(turn_angle)
+            
+            # Calculate how far this point deviates from 90° (straight)
+            deviation_from_90 = abs(turn_angle_degrees - 90.0)
+            
+            # Apply threshold - treat small deviations as straight
+            min_deviation = 2.0  # 2 degrees minimum deviation to be considered curved
+            if deviation_from_90 < min_deviation:
                 curvature = 0.0
+                print(f"Point {i}: STRAIGHT (deviation too small) - turn angle = {turn_angle_degrees:.2f}°, deviation = {deviation_from_90:.2f}°")
+            else:
+                # Higher deviation from 90° = higher curvature
+                # Normalize by max possible deviation (90°)
+                curvature = deviation_from_90 / 90.0
+                
+                print(f"Point {i}: curvature = {curvature:.4f}, turn angle = {turn_angle_degrees:.2f}°, deviation from 90° = {deviation_from_90:.2f}°")
             
             curvatures.append(curvature)
         
@@ -67,144 +103,132 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         if curvatures:
             curvatures.insert(0, curvatures[0])
             curvatures.append(curvatures[-1])
+            print(f"Added edge curvatures: first = {curvatures[0]:.4f}, last = {curvatures[-1]:.4f}")
         else:
-            return False
+            curvatures = [0.0] * len(positions)
+            print("No curvatures calculated, using zeros")
         
-        # Convert curvatures to speed weights
-        max_curvature = max(curvatures) if curvatures else 1.0
-        speed_weights = []
+        print(f"Final curvatures summary:")
+        print(f"  Zero curvatures (straight): {curvatures.count(0.0)}")
+        print(f"  Non-zero curvatures (curved): {len([c for c in curvatures if c > 0])}")
+        print(f"  Max curvature: {max(curvatures):.4f}")
+        print(f"  First 10 curvatures: {[f'{c:.4f}' for c in curvatures[:10]]}")
         
+        # Apply threshold to filter out very small curvatures
+        thresholded_curvatures = []
         for curvature in curvatures:
-            if max_curvature > 0:
-                # Normalize curvature (0 to 1)
-                norm_curvature = curvature / max_curvature
-                # Convert to speed factor (high curvature = low speed)
-                speed_factor = max_speed_factor - (norm_curvature * (max_speed_factor - min_speed_factor))
+            if curvature < curvature_threshold:
+                thresholded_curvatures.append(0.0)
             else:
-                speed_factor = max_speed_factor
+                thresholded_curvatures.append(curvature)
+        
+        changes_after_threshold = sum(1 for i in range(len(curvatures)) if curvatures[i] != thresholded_curvatures[i])
+        print(f"Threshold ({curvature_threshold}) changed {changes_after_threshold} values")
+        
+        # Smooth curvatures to avoid jitter
+        smoothed_curvatures = []
+        window_size = 5
+        for i in range(len(thresholded_curvatures)):
+            start_idx = max(0, i - window_size // 2)
+            end_idx = min(len(thresholded_curvatures), i + window_size // 2 + 1)
+            avg_curvature = sum(thresholded_curvatures[start_idx:end_idx]) / (end_idx - start_idx)
+            smoothed_curvatures.append(avg_curvature)
+        
+        print(f"Smoothed curvatures: {[f'{c:.4f}' for c in smoothed_curvatures[:10]]}")
+        
+        # Convert curvatures to speeds (this part was already correct)
+        if smoothed_curvatures:
+            min_curvature = min(smoothed_curvatures)
+            max_curvature = max(smoothed_curvatures)
             
-            # Weight is inverse of speed (more time needed for slow sections)
-            weight = 1.0 / max(speed_factor, 0.1)
-            speed_weights.append(weight)
-        
-        # Build cumulative time distribution
-        cumulative_weights = []
-        total_weight = 0.0
-        for weight in speed_weights:
-            total_weight += weight
-            cumulative_weights.append(total_weight)
-        
-        # Normalize to [0, 1]
-        if total_weight > 0:
-            cumulative_weights = [w / total_weight for w in cumulative_weights]
-        
-        # Determine keyframe positions based on curvature variation
-        keyframe_data = find_keyframe_positions(curvatures, cumulative_weights)
-        
-        # Clear existing offset keyframes and set up basic animation
-        follow_path_constraint.offset_factor = 0.0
-        follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=start_frame)
-        follow_path_constraint.offset_factor = 1.0
-        follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=end_frame)
-        
-        # Add intermediate keyframes based on curvature analysis
-        total_frames = end_frame - start_frame
-        for keyframe_info in keyframe_data:
-            curve_param = keyframe_info['curve_parameter']
-            time_factor = keyframe_info['time_factor']
+            print(f"Curvature range: {min_curvature:.4f} to {max_curvature:.4f}")
             
-            frame_time = start_frame + (time_factor * total_frames)
-            follow_path_constraint.offset_factor = curve_param
-            follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=frame_time)
+            speeds = []
+            if max_curvature > min_curvature and max_curvature > 0:
+                for curvature in smoothed_curvatures:
+                    if curvature == 0.0:
+                        speed = 1.0  # Maximum speed for straight sections
+                    else:
+                        normalized = (curvature - min_curvature) / (max_curvature - min_curvature)
+                        speed = 1.0 - normalized  # High curvature = low speed
+                    speeds.append(speed)
+            else:
+                # All curvatures are below threshold or identical - use constant speed
+                speeds = [1.0] * len(smoothed_curvatures)
+                print("Using constant speed (no significant curvature variation)")
+        else:
+            speeds = [1.0]
         
-        # Set interpolation to linear for predictable timing
-        if follow_path_constraint.id_data.animation_data and follow_path_constraint.id_data.animation_data.action:
-            action = follow_path_constraint.id_data.animation_data.action
-            fcurve = action.fcurves.find(f'constraints["{follow_path_constraint.name}"].offset_factor')
-            if fcurve:
-                for keyframe in fcurve.keyframe_points:
-                    keyframe.interpolation = 'LINEAR'
+        print(f"Speed factors: {[f'{s:.4f}' for s in speeds[:10]]}")
         
+        # Calculate cumulative distances based on speeds
+        segment_distances = []
+        for i in range(len(speeds) - 1):
+            avg_speed = (speeds[i] + speeds[i + 1]) / 2.0
+            adjusted_speed = min_speed_factor + avg_speed * (max_speed_factor - min_speed_factor)
+            segment_distance = adjusted_speed  # Inverse of speed
+            segment_distances.append(segment_distance)
+        
+        print(f"Segment distances: {[f'{d:.4f}' for d in segment_distances[:10]]}")
+        
+        # Calculate cumulative distances
+        cumulative_distances = [0.0]
+        for dist in segment_distances:
+            cumulative_distances.append(cumulative_distances[-1] + dist)
+        
+        print(f"Cumulative distances: {[f'{d:.4f}' for d in cumulative_distances[:10]]}")
+        
+        # Normalize cumulative distances to 0-1 range
+        total_distance = cumulative_distances[-1]
+        if total_distance > 0:
+            normalized_positions = [d / total_distance for d in cumulative_distances]
+        else:
+            normalized_positions = [i / (len(cumulative_distances) - 1) for i in range(len(cumulative_distances))]
+        
+        print(f"Normalized positions: {[f'{p:.4f}' for p in normalized_positions[:10]]}")
+
+        # Reset resolution
+        curve_obj.data.resolution_u = original_resolution
+        curve_obj.data.render_resolution_u = original_render_resolution
+        
+        # Set keyframes for each frame
+        print(f"Setting keyframes from frame {start_frame} to {end_frame}")
+        for frame_offset in range(total_frames + 1):
+            current_frame = start_frame + frame_offset
+            frame_progress = frame_offset / total_frames
+            
+            # Find the corresponding position along the path
+            position = frame_progress  # Default linear
+            
+            # Interpolate between normalized positions
+            for i in range(len(normalized_positions) - 1):
+                t1 = i / (len(normalized_positions) - 1)
+                t2 = (i + 1) / (len(normalized_positions) - 1)
+                
+                if t1 <= frame_progress <= t2:
+                    # Linear interpolation between positions
+                    local_t = (frame_progress - t1) / (t2 - t1) if t2 > t1 else 0
+                    position = normalized_positions[i] + local_t * (normalized_positions[i + 1] - normalized_positions[i])
+                    break
+            
+            # Ensure position stays within bounds
+            position = max(0.0, min(1.0, position))
+            
+            # Set keyframe
+            follow_path_constraint.offset_factor = position
+            follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=current_frame)
+            
+            if frame_offset % 10 == 0:  # Print every 10th frame to avoid spam
+                print(f"Frame {current_frame}: progress = {frame_progress:.3f}, position = {position:.3f}")
+        
+        print("Speed control applied successfully!")
         return True
         
     except Exception as e:
         print(f"Error in apply_speed_control: {e}")
+        import traceback
+        traceback.print_exc()
         return False
-
-
-def sample_mesh_at_parameter(mesh, t):
-    """Sample a position along the mesh at parameter t (0 to 1)"""
-    if not mesh.edges:
-        return Vector((0, 0, 0))
-    
-    # Calculate total edge length
-    total_length = 0.0
-    edge_lengths = []
-    for edge in mesh.edges:
-        v1 = mesh.vertices[edge.vertices[0]].co
-        v2 = mesh.vertices[edge.vertices[1]].co
-        length = (v2 - v1).length
-        edge_lengths.append(length)
-        total_length += length
-    
-    if total_length == 0:
-        return Vector((0, 0, 0))
-    
-    # Find position at parameter t
-    target_length = t * total_length
-    current_length = 0.0
-    
-    for i, edge in enumerate(mesh.edges):
-        edge_length = edge_lengths[i]
-        if current_length + edge_length >= target_length:
-            # Interpolate within this edge
-            local_t = (target_length - current_length) / edge_length if edge_length > 0 else 0
-            v1 = mesh.vertices[edge.vertices[0]].co
-            v2 = mesh.vertices[edge.vertices[1]].co
-            return v1.lerp(v2, local_t)
-        current_length += edge_length
-    
-    # Fallback to last vertex
-    return mesh.vertices[-1].co
-
-
-def find_keyframe_positions(curvatures, cumulative_weights):
-    """Find optimal keyframe positions based on curvature changes"""
-    keyframes = []
-    
-    # Look for significant curvature changes
-    if len(curvatures) < 5:
-        return keyframes
-    
-    # Calculate curvature change rate
-    curvature_changes = []
-    for i in range(1, len(curvatures)):
-        change = abs(curvatures[i] - curvatures[i-1])
-        curvature_changes.append(change)
-    
-    # Find peaks in curvature change (areas where speed should transition)
-    avg_change = sum(curvature_changes) / len(curvature_changes) if curvature_changes else 0
-    threshold = avg_change * 1.5  # Adaptive threshold
-    
-    # Minimum distance between keyframes (prevent clustering)
-    min_separation = max(5, len(curvatures) // 20)
-    last_keyframe_index = -min_separation
-    
-    for i, change in enumerate(curvature_changes):
-        if change > threshold and (i - last_keyframe_index) >= min_separation:
-            # Don't place keyframes too close to start/end
-            if i > 5 and i < len(curvatures) - 5:
-                curve_param = i / (len(curvatures) - 1)
-                time_factor = cumulative_weights[i]
-                
-                keyframes.append({
-                    'curve_parameter': curve_param,
-                    'time_factor': time_factor
-                })
-                last_keyframe_index = i
-    
-    return keyframes
-
 
 class ANIMPATH_OT_animate_object_along_path(Operator):
     """Animate the assigned object along the selected path using Follow Path constraint and apply poses/animations"""
@@ -341,8 +365,7 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 success = apply_speed_control(
                     follow_path, path_obj, start_frame, end_frame,
                     min_speed_factor=props.min_speed_factor, 
-                    max_speed_factor=props.max_speed_factor,
-                    num_samples=props.curvature_samples,
+                    max_speed_factor=props.max_speed_factor
                 )
                 
                 if success:
