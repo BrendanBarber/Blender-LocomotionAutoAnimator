@@ -56,8 +56,7 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         # Calculate curvature at each point along the curve mesh
         curvatures = []
         
-        # FIXED: Correct curvature calculation
-        step = 4
+        step = 3
         for i in range(step, len(positions) - step):
             p1 = positions[i - step]
             p2 = positions[i]
@@ -127,7 +126,7 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         
         # Smooth curvatures to avoid jitter
         smoothed_curvatures = []
-        window_size = 5
+        window_size = 10
         for i in range(len(thresholded_curvatures)):
             start_idx = max(0, i - window_size // 2)
             end_idx = min(len(thresholded_curvatures), i + window_size // 2 + 1)
@@ -302,7 +301,7 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             
             # Set Animation target to be the target object
             animation_target = target_obj
-            
+
             # Handle rotation based on use_rotation setting
             if use_rotation:
                 # When use_rotation is True, set initial rotation and let curve following handle the rest
@@ -320,7 +319,6 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 # Keyframe current rotation to prevent unwanted rotation
                 current_rotation = animation_target.rotation_euler.copy()
                 animation_target.rotation_euler = current_rotation
-                animation_target.keyframe_insert(data_path="rotation_euler", frame=start_frame - 1)
                 animation_target.keyframe_insert(data_path="rotation_euler", frame=start_frame)
                 animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame)
                 animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame + 1)
@@ -342,16 +340,6 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             if end_pos:
                 animation_target.location = end_pos + object_offset
                 animation_target.keyframe_insert(data_path="location", frame=end_frame + 1)
-
-            # Final rotation after path ends
-            if use_rotation:
-                context.scene.frame_set(end_frame)
-                world_matrix = animation_target.matrix_world.copy()
-                final_rotation = world_matrix.to_euler()
-
-                context.scene.frame_set(end_frame + 1)
-                animation_target.rotation_euler = final_rotation
-                animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame + 1)\
 
             # Use Fixed Location for speed control
             follow_path.use_fixed_location = True
@@ -382,13 +370,29 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 speed_info = "with bezier ease in/out"
 
             # Control constraint influence
-            follow_path.influence = 1.0
-            follow_path.keyframe_insert(data_path="influence", frame=start_frame)
-            follow_path.keyframe_insert(data_path="influence", frame=end_frame)
             follow_path.influence = 0.0
             follow_path.keyframe_insert(data_path="influence", frame=end_frame + 1)
             follow_path.keyframe_insert(data_path="influence", frame=start_frame - 1)
+            follow_path.influence = 1.0
+            follow_path.keyframe_insert(data_path="influence", frame=start_frame)
+            follow_path.keyframe_insert(data_path="influence", frame=end_frame)
             
+
+            # Final rotation after path ends
+            if use_rotation:
+                context.scene.frame_set(end_frame)
+                context.view_layer.update()  # Force scene update
+                context.evaluated_depsgraph_get().update()  # Force dependency graph update
+                
+                # Now capture the actual constrained rotation
+                world_matrix = animation_target.matrix_world.copy()
+                final_rotation = world_matrix.to_euler()
+                
+                # Apply this rotation to end_frame + 1 (unconstrained)
+                context.scene.frame_set(end_frame + 1)
+                animation_target.rotation_euler = final_rotation
+                animation_target.keyframe_insert(data_path="rotation_euler", frame=end_frame + 1)
+
             # Set interpolation for path animation
             if animation_target.animation_data and animation_target.animation_data.action:
                 for fcurve in animation_target.animation_data.action.fcurves:

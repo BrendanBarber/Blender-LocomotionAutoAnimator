@@ -308,14 +308,20 @@ def create_nla_strips_for_path(target_obj, path_obj):
                 main_strip.blend_type = 'REPLACE'
                 main_strip.extrapolation = 'HOLD'
                 
-                # Apply blend in/out
-                if start_blend_frames > 0:
+                # Apply blend in/out only if corresponding poses are set
+                if start_blend_frames > 0 and start_pose_name != "NONE":
                     main_strip.blend_in = start_blend_frames
                     print(f"Set blend_in: {start_blend_frames} frames")
+                else:
+                    if start_pose_name == "NONE":
+                        print("Start pose is NONE - ignoring start blend")
                 
-                if end_blend_frames > 0:
+                if end_blend_frames > 0 and end_pose_name != "NONE":
                     main_strip.blend_out = end_blend_frames
                     print(f"Set blend_out: {end_blend_frames} frames")
+                else:
+                    if end_pose_name == "NONE":
+                        print("End pose is NONE - ignoring end blend")
                 
                 # Set up action repeating if needed
                 action_length = main_action.frame_range[1] - main_action.frame_range[0]

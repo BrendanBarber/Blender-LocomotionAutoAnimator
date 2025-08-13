@@ -172,13 +172,6 @@ class ANIMPATH_PT_object_animation(Panel):
                 target_obj = bpy.data.objects.get(target_obj_name)
                 if target_obj:
                     col = box.column(align=True)
-                    col.label(text=f"Target: {target_obj.name}", icon='OBJECT_DATA')
-                    
-                    # Check if target has an armature (for rig detection)
-                    has_armature = self._check_for_armature(target_obj)
-                    if has_armature:
-                        armature_name = self._get_armature_name(target_obj)
-                        col.label(text=f"Rig: {armature_name}", icon='ARMATURE_DATA')
                     
                     col.separator()
                     
@@ -308,10 +301,6 @@ class ANIMPATH_PT_curvature_control(Panel):
             row.prop(props, "max_speed_factor", text="Straights")
             
             col.separator()
-            
-            col.label(text="Analysis Settings:", icon='SETTINGS')
-            col.prop(props, "curvature_sensitivity", text="Sensitivity")
-            col.prop(props, "curvature_samples", text="Samples")
             
             # Show speed range preview
             if props.min_speed_factor > 0:
