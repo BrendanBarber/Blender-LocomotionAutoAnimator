@@ -1,4 +1,2 @@
-BUG: Follow-Path constraints stack when Animate is hit multiple times
-
 FEATURE: Convert the every frame keyframe to the minimal amount of keyframes needed
 FEATURE: Change animation speed depending on calculated length

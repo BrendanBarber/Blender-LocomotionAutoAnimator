@@ -151,7 +151,7 @@ class AnimationPathProperties(PropertyGroup):
     clear_existing_animation: BoolProperty(
         name="Clear Existing Animation",
         description="Clear existing location keyframes before applying path animation",
-        default=False
+        default=True
     )
     
     keyframe_density: IntProperty(
