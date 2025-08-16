@@ -567,25 +567,59 @@ def _clear_animation_by_frame_range(target_obj, start_frame, end_frame):
     
     return cleanup_performed
 
+def get_constraint_keyframe_frames(constraint, data_path):
+    """Get the actual frame numbers where keyframes exist for a constraint property"""
+    try:
+        keyframe_frames = []
+        
+        if hasattr(constraint, 'id_data') and constraint.id_data.animation_data:
+            action = constraint.id_data.animation_data.action
+            constraint_path = f'constraints["{constraint.name}"].{data_path}'
+            
+            for fcurve in action.fcurves:
+                if fcurve.data_path == constraint_path:
+                    keyframe_frames = [kf.co[0] for kf in fcurve.keyframe_points]
+                    break
+        
+        return sorted(keyframe_frames)
+        
+    except Exception as e:
+        print(f"Error getting keyframe frames: {e}")
+        return []
+
 def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_frame, 
                         min_speed_factor=0.5, 
                         max_speed_factor=1.0,
-                        curvature_threshold=0.001):
+                        curvature_threshold=0.001,
+                        use_keyframe_reduction=True,
+                        error_tolerance=0.01):
     """
     Apply curvature-based speed control to a Follow Path constraint.
     Slows down on sharp curves, speeds up on straight sections.
     
-    curvature_threshold: Minimum curvature value to consider. Lower values are treated as 0.0 (straight).
+    New parameters:
+    use_keyframe_reduction: If True, reduces keyframes using Bezier approximation
+    error_tolerance: Maximum error tolerance for keyframe reduction
     """
     try:
         import bmesh
         import mathutils
         import math
         
+        # Import the keyframe reduction module
+        try:
+            from .keyframe_reduction import reduce_keyframes_to_bezier, convert_to_blender_keyframes
+        except ImportError:
+            print("Warning: keyframe_reduction module not found, falling back to dense keyframes")
+            use_keyframe_reduction = False
+        
         total_frames = end_frame - start_frame
         if total_frames <= 0:
             return False
             
+        # [Your existing curvature calculation code stays the same until the keyframe setting part]
+        # ... (all the curve mesh sampling, curvature calculation, speed calculation code) ...
+        
         # Get curve mesh representation for sampling
         context = bpy.context
         depsgraph = context.evaluated_depsgraph_get()
@@ -633,9 +667,7 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             # The angle between the vectors (in radians)
             angle = math.acos(dot_product)
             
-            # FIXED: Use deviation from 90° as curvature measure
-            # Based on your data, 90° turn angle = straight sections
-            # Points farther from 90° = more curved sections
+            # Use deviation from 90° as curvature measure
             turn_angle = math.pi - angle
             turn_angle_degrees = math.degrees(turn_angle)
             
@@ -646,13 +678,10 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             min_deviation = 2.0  # 2 degrees minimum deviation to be considered curved
             if deviation_from_90 < min_deviation:
                 curvature = 0.0
-                print(f"Point {i}: STRAIGHT (deviation too small) - turn angle = {turn_angle_degrees:.2f}°, deviation = {deviation_from_90:.2f}°")
             else:
                 # Higher deviation from 90° = higher curvature
                 # Normalize by max possible deviation (90°)
                 curvature = deviation_from_90 / 90.0
-                
-                print(f"Point {i}: curvature = {curvature:.4f}, turn angle = {turn_angle_degrees:.2f}°, deviation from 90° = {deviation_from_90:.2f}°")
             
             curvatures.append(curvature)
         
@@ -660,16 +689,8 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         if curvatures:
             curvatures.insert(0, curvatures[0])
             curvatures.append(curvatures[-1])
-            print(f"Added edge curvatures: first = {curvatures[0]:.4f}, last = {curvatures[-1]:.4f}")
         else:
             curvatures = [0.0] * len(positions)
-            print("No curvatures calculated, using zeros")
-        
-        print(f"Final curvatures summary:")
-        print(f"  Zero curvatures (straight): {curvatures.count(0.0)}")
-        print(f"  Non-zero curvatures (curved): {len([c for c in curvatures if c > 0])}")
-        print(f"  Max curvature: {max(curvatures):.4f}")
-        print(f"  First 10 curvatures: {[f'{c:.4f}' for c in curvatures[:10]]}")
         
         # Apply threshold to filter out very small curvatures
         thresholded_curvatures = []
@@ -678,9 +699,6 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
                 thresholded_curvatures.append(0.0)
             else:
                 thresholded_curvatures.append(curvature)
-        
-        changes_after_threshold = sum(1 for i in range(len(curvatures)) if curvatures[i] != thresholded_curvatures[i])
-        print(f"Threshold ({curvature_threshold}) changed {changes_after_threshold} values")
         
         # Smooth curvatures to avoid jitter
         smoothed_curvatures = []
@@ -691,14 +709,10 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             avg_curvature = sum(thresholded_curvatures[start_idx:end_idx]) / (end_idx - start_idx)
             smoothed_curvatures.append(avg_curvature)
         
-        print(f"Smoothed curvatures: {[f'{c:.4f}' for c in smoothed_curvatures[:10]]}")
-        
-        # Convert curvatures to speeds (this part was already correct)
+        # Convert curvatures to speeds
         if smoothed_curvatures:
             min_curvature = min(smoothed_curvatures)
             max_curvature = max(smoothed_curvatures)
-            
-            print(f"Curvature range: {min_curvature:.4f} to {max_curvature:.4f}")
             
             speeds = []
             if max_curvature > min_curvature and max_curvature > 0:
@@ -712,11 +726,8 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             else:
                 # All curvatures are below threshold or identical - use constant speed
                 speeds = [1.0] * len(smoothed_curvatures)
-                print("Using constant speed (no significant curvature variation)")
         else:
             speeds = [1.0]
-        
-        print(f"Speed factors: {[f'{s:.4f}' for s in speeds[:10]]}")
         
         # Calculate cumulative distances based on speeds
         segment_distances = []
@@ -726,14 +737,10 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             segment_distance = adjusted_speed  # Inverse of speed
             segment_distances.append(segment_distance)
         
-        print(f"Segment distances: {[f'{d:.4f}' for d in segment_distances[:10]]}")
-        
         # Calculate cumulative distances
         cumulative_distances = [0.0]
         for dist in segment_distances:
             cumulative_distances.append(cumulative_distances[-1] + dist)
-        
-        print(f"Cumulative distances: {[f'{d:.4f}' for d in cumulative_distances[:10]]}")
         
         # Normalize cumulative distances to 0-1 range
         total_distance = cumulative_distances[-1]
@@ -741,15 +748,15 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             normalized_positions = [d / total_distance for d in cumulative_distances]
         else:
             normalized_positions = [i / (len(cumulative_distances) - 1) for i in range(len(cumulative_distances))]
-        
-        print(f"Normalized positions: {[f'{p:.4f}' for p in normalized_positions[:10]]}")
 
         # Reset resolution
         curve_obj.data.resolution_u = original_resolution
         curve_obj.data.render_resolution_u = original_render_resolution
         
-        # Set keyframes for each frame
-        print(f"Setting keyframes from frame {start_frame} to {end_frame}")
+        # NEW: Collect all dense points instead of setting keyframes immediately
+        dense_points = []
+        print(f"Collecting dense animation data from frame {start_frame} to {end_frame}")
+        
         for frame_offset in range(total_frames + 1):
             current_frame = start_frame + frame_offset
             frame_progress = frame_offset / total_frames
@@ -771,12 +778,30 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             # Ensure position stays within bounds
             position = max(0.0, min(1.0, position))
             
-            # Set keyframe
-            follow_path_constraint.offset_factor = position
-            follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=current_frame)
+            # Store the point instead of setting keyframe
+            dense_points.append((current_frame, position))
+        
+        print(f"Collected {len(dense_points)} dense points")
+        
+        # NEW: Apply keyframe reduction if enabled
+        if use_keyframe_reduction and len(dense_points) > 10:  # Only reduce if we have enough points
+            print("Applying keyframe reduction algorithm...")
+            reduced_keyframes = reduce_keyframes_to_bezier(dense_points, error_tolerance)
             
-            if frame_offset % 10 == 0:  # Print every 10th frame to avoid spam
-                print(f"Frame {current_frame}: progress = {frame_progress:.3f}, position = {position:.3f}")
+            # Apply the reduced keyframes to Blender
+            convert_to_blender_keyframes(reduced_keyframes, follow_path_constraint, "offset_factor")
+            
+            print(f"Reduced from {len(dense_points)} to {len(reduced_keyframes)} keyframes with Bezier interpolation")
+            speed_info = f"with curvature control ({min_speed_factor:.1f}x-{max_speed_factor:.1f}x) - {len(reduced_keyframes)} Bezier keyframes"
+            
+        else:
+            # Fallback: Set keyframes for every frame (original method)
+            print("Using dense keyframes (reduction disabled or insufficient points)")
+            for frame, position in dense_points:
+                follow_path_constraint.offset_factor = position
+                follow_path_constraint.keyframe_insert(data_path="offset_factor", frame=frame)
+                
+            speed_info = f"with curvature control ({min_speed_factor:.1f}x-{max_speed_factor:.1f}x) - {len(dense_points)} dense keyframes"
         
         print("Speed control applied successfully!")
         return True

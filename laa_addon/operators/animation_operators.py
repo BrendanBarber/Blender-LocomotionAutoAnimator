@@ -8,7 +8,7 @@ import math
 from mathutils import Vector
 from bpy.types import Operator
 
-from .animation_operators_utils import clear_selective_animation, apply_speed_control, store_keyframe_tracking_data
+from .animation_operators_utils import clear_selective_animation, apply_speed_control, store_keyframe_tracking_data, get_constraint_keyframe_frames
 
 class ANIMPATH_OT_animate_object_along_path(Operator):
     """Animate the assigned object along the selected path using Follow Path constraint and apply poses/animations"""
@@ -153,16 +153,20 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 success = apply_speed_control(
                     follow_path, path_obj, start_frame, end_frame,
                     min_speed_factor=props.min_speed_factor, 
-                    max_speed_factor=props.max_speed_factor
+                    max_speed_factor=props.max_speed_factor,
+                    use_keyframe_reduction=props.use_keyframe_reduction,
+                    error_tolerance=props.keyframe_error_tolerance
                 )
                 
                 if success:
-                    # Track all offset_factor keyframes created by speed control
-                    total_frames = end_frame - start_frame
-                    for frame_offset in range(total_frames + 1):
-                        current_frame = start_frame + frame_offset
-                        keyframe_data["constraints"][follow_path.name]["offset_factor"].append(current_frame)
-                    speed_info = f"with curvature control ({props.min_speed_factor:.1f}x-{props.max_speed_factor:.1f}x)"
+                    # NEW: Get the actual keyframes that were created
+                    actual_keyframes = get_constraint_keyframe_frames(follow_path, "offset_factor")
+                    keyframe_data["constraints"][follow_path.name]["offset_factor"] = actual_keyframes
+                                        
+                    if props.use_keyframe_reduction:
+                        speed_info = f"with curvature control ({props.min_speed_factor:.1f}x-{props.max_speed_factor:.1f}x) - Bezier optimized"
+                    else:
+                        speed_info = f"with curvature control ({props.min_speed_factor:.1f}x-{props.max_speed_factor:.1f}x) - dense keyframes"
                 else:
                     # Fallback to traditional method if curvature control fails
                     self._apply_traditional_speed_control(follow_path, start_frame, end_frame, 
@@ -282,34 +286,105 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
     
     def _apply_rig_animations(self, target_obj, path_obj, start_frame, end_frame,
                              start_pose, end_pose, main_anim, start_blend_frames, end_blend_frames):
-        """Apply poses and animations to the rig"""
-        # Find the armature - either the target object itself or a child
+        """Apply poses and animations to the rig with speed matching"""
+        # Find the armature
         armature_obj = self._find_armature(target_obj)
         
         if not armature_obj:
             print(f"No armature found for {target_obj.name} - skipping pose/animation application")
             return
         
-        # IMPORTANT: Only apply to armature if it's NOT the same as target_obj
-        # or if target_obj already has path animation keyframes
+        # Check if we should use speed-matched NLA strips
+        props = bpy.context.scene.animation_path_props
+        use_speed_matched_animation = getattr(props, 'use_speed_matched_animation', False)
+        
+        if use_speed_matched_animation and main_anim != "NONE":
+            # Get the speed data from the constraint we just created
+            speed_data = self._extract_speed_data_from_constraint(target_obj, path_obj, start_frame, end_frame)
+            
+            if speed_data:
+                # Convert to segments
+                from .. import animation_library
+                segments = animation_library.convert_speed_data_to_segments(speed_data, start_frame, end_frame)
+                
+                if segments:
+                    # Use speed-matched strips instead of regular NLA
+                    success = animation_library.create_speed_matched_nla_strips(armature_obj, path_obj, segments)
+                    
+                    if success:
+                        print(f"Applied speed-matched NLA strips to {armature_obj.name}")
+                        return
+                    else:
+                        print("Speed-matched strips failed, falling back to regular NLA")
+        
+        # Fallback to your existing NLA system
         if armature_obj == target_obj:
-            # Store existing animation data before applying rig animations
             existing_action = None
             if target_obj.animation_data and target_obj.animation_data.action:
                 existing_action = target_obj.animation_data.action
                 
-            # Apply rig animations
             from .. import animation_library
             success = animation_library.create_nla_strips_for_path(armature_obj, path_obj)
             
-            # Restore the original action to preserve path keyframes
             if existing_action and target_obj.animation_data:
                 target_obj.animation_data.action = existing_action
-                
         else:
-            # Safe to apply to child armature
             from .. import animation_library
             success = animation_library.create_nla_strips_for_path(armature_obj, path_obj)
+
+
+    def _extract_speed_data_from_constraint(self, target_obj, path_obj, start_frame, end_frame):
+        """Extract speed data from the Follow Path constraint keyframes"""
+        speed_data = {}
+        
+        try:
+            # Find the Follow Path constraint
+            constraint_name = f"FollowPath_{path_obj.name}"
+            follow_path = None
+            
+            for constraint in target_obj.constraints:
+                if constraint.name == constraint_name:
+                    follow_path = constraint
+                    break
+            
+            if not follow_path or not target_obj.animation_data or not target_obj.animation_data.action:
+                return speed_data
+            
+            # Find the offset_factor fcurve
+            action = target_obj.animation_data.action
+            offset_fcurve = None
+            
+            for fcurve in action.fcurves:
+                if fcurve.data_path == f'constraints["{constraint_name}"].offset_factor':
+                    offset_fcurve = fcurve
+                    break
+            
+            if not offset_fcurve:
+                return speed_data
+            
+            # Sample the curve to get speed at each frame
+            for frame in range(start_frame, end_frame + 1):
+                current_offset = offset_fcurve.evaluate(frame)
+                next_offset = offset_fcurve.evaluate(frame + 1)
+                
+                # Calculate speed as change in offset per frame
+                speed = abs(next_offset - current_offset)
+                
+                # Normalize speed (you may need to adjust this based on your setup)
+                # This assumes normal speed is around 0.01 offset units per frame
+                normalized_speed = speed / 0.01
+                
+                # Clamp to reasonable range
+                normalized_speed = max(0.1, min(normalized_speed, 3.0))
+                
+                speed_data[frame] = normalized_speed
+            
+            print(f"Extracted speed data for {len(speed_data)} frames")
+            return speed_data
+            
+        except Exception as e:
+            print(f"Error extracting speed data: {e}")
+            return speed_data
     
     def _find_armature(self, target_obj):
         """Find an armature object - either the target itself or its child"""

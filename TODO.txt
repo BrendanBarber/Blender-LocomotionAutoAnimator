@@ -1,2 +1,2 @@
-FEATURE: Convert the every frame keyframe to the minimal amount of keyframes needed
-FEATURE: Change animation speed depending on calculated length
+FEATURE: Change animation speed depending the current calculated speed
+FEATURE: Add back in speed up and slow down at beginning and end depending on the number of blend frames

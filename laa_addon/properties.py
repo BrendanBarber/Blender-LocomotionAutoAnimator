@@ -172,7 +172,7 @@ class AnimationPathProperties(PropertyGroup):
     min_speed_factor: FloatProperty(
         name="Min Speed (Curves)",
         description="Minimum speed multiplier on tight curves (0.4 = 40% speed)",
-        default=0.4,
+        default=0.75,
         min=0.1,
         max=1.0,
         update=property_update_callback
@@ -180,10 +180,10 @@ class AnimationPathProperties(PropertyGroup):
     
     max_speed_factor: FloatProperty(
         name="Max Speed (Straights)",
-        description="Maximum speed multiplier on straight sections (1.8 = 180% speed)",
-        default=1.8,
+        description="Maximum speed multiplier on straight sections (1.5 = 150% speed)",
+        default=1.0,
         min=1.0,
-        max=3.0,
+        max=5.0,
         update=property_update_callback
     )
     
@@ -205,6 +205,27 @@ class AnimationPathProperties(PropertyGroup):
         update=property_update_callback
     )
 
+    use_keyframe_reduction: BoolProperty(
+        name="Use Keyframe Reduction",
+        description="Reduce the number of keyframes using Bezier approximation for smoother curves",
+        default=True
+    )
+    
+    keyframe_error_tolerance: FloatProperty(
+        name="Keyframe Error Tolerance",
+        description="Maximum allowed error when reducing keyframes (lower = more keyframes)",
+        default=0.01,
+        min=0.001,
+        max=0.1,
+        step=0.001,
+        precision=3
+    )
+
+    use_speed_matched_animation: bpy.props.BoolProperty(
+        name="Speed-Matched Animation",
+        description="Use multiple NLA strips with different playback speeds instead of single strip",
+        default=False
+    )
 
 classes = [
     AnimationPathProperties,

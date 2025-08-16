@@ -16,7 +16,7 @@ import importlib
 
 try:
     from . import animation_path
-    from . import operators  # This now imports the operators package
+    from . import operators
     from . import panels
     from . import properties
     from . import animation_library
@@ -39,7 +39,7 @@ def register():
         reload_modules()
         properties.register()
         panels.register()
-        operators.register()  # This will register all operator submodules
+        operators.register()
         print("Locomotion Auto Animator addon registered successfully")
     except Exception as e:
         print(f"Error registering Locomotion Auto Animator addon: {e}")
@@ -48,7 +48,7 @@ def register():
 
 def unregister():
     try:
-        operators.unregister()  # This will unregister all operator submodules
+        operators.unregister()
         panels.unregister()
         properties.unregister()
         print("Locomotion Auto Animator addon unregistered successfully")

@@ -425,6 +425,245 @@ def apply_pose_to_armature(armature_obj, pose_name, frame=None):
     print(f"Applied pose {pose_name} to {armature_obj.name}")
     return True
 
+def create_speed_matched_nla_strips(target_obj, path_obj, speed_data):
+    """
+    Create multiple NLA strips with different playback speeds based on speed data.
+    
+    speed_data should be a list of segments like:
+    [
+        {
+            'start_frame': 10,
+            'end_frame': 30, 
+            'speed_multiplier': 0.5,  # Slow section
+            'blend_frames': 5
+        },
+        {
+            'start_frame': 30,
+            'end_frame': 60,
+            'speed_multiplier': 1.5,  # Fast section  
+            'blend_frames': 5
+        }
+    ]
+    """
+    if not target_obj or not path_obj:
+        print("Error: Missing target object or path object")
+        return False
+    
+    # Get path properties
+    start_pose_name = path_obj.get("start_pose", "NONE")
+    end_pose_name = path_obj.get("end_pose", "NONE") 
+    anim_name = path_obj.get("anim", "NONE")
+    path_name = path_obj.name
+    
+    # Ensure target has animation data
+    if not target_obj.animation_data:
+        target_obj.animation_data_create()
+    
+    # Create or find main NLA track
+    track_name = f"LAA_{path_name}_SpeedMatched"
+    nla_track = None
+    
+    for track in target_obj.animation_data.nla_tracks:
+        if track.name == track_name:
+            nla_track = track
+            break
+    
+    if not nla_track:
+        nla_track = target_obj.animation_data.nla_tracks.new()
+        nla_track.name = track_name
+        print(f"Created speed-matched NLA track: {track_name}")
+    
+    # Clear existing strips
+    for strip in list(nla_track.strips):
+        nla_track.strips.remove(strip)
+    
+    strips_created = 0
+    
+    try:
+        # Create base pose layer if needed
+        if start_pose_name != "NONE":
+            base_track = _create_base_pose_track(target_obj, path_obj, start_pose_name)
+        
+        # Get the main animation action
+        if anim_name == "NONE":
+            print("No animation specified - skipping speed-matched strips")
+            return False
+            
+        main_action = get_animation_action(anim_name)
+        if not main_action:
+            print(f"Could not load animation: {anim_name}")
+            return False
+        
+        action_length = main_action.frame_range[1] - main_action.frame_range[0]
+        
+        # Create strips for each speed segment
+        for i, segment in enumerate(speed_data):
+            start_frame = segment['start_frame']
+            end_frame = segment['end_frame']
+            speed_multiplier = segment['speed_multiplier']
+            blend_frames = segment.get('blend_frames', 0)
+            
+            segment_duration = end_frame - start_frame
+            
+            # Create strip for this segment
+            strip_name = f"{path_name}_Segment_{i+1}_Speed_{speed_multiplier:.2f}"
+            strip = nla_track.strips.new(strip_name, start_frame, main_action)
+            strip.frame_end = end_frame
+            strip.scale = speed_multiplier  # This is the key - set playback speed!
+            strip.blend_type = 'REPLACE'
+            strip.extrapolation = 'HOLD'
+            
+            # Set up blending between segments
+            if i > 0 and blend_frames > 0:
+                strip.blend_in = blend_frames
+            
+            if i < len(speed_data) - 1 and blend_frames > 0:
+                strip.blend_out = blend_frames
+            
+            # Adjust action repeating based on speed
+            if action_length > 0:
+                # How much of the action should play during this segment
+                effective_duration = segment_duration * speed_multiplier
+                strip.repeat = effective_duration / action_length
+                
+                # Offset the action start to maintain continuity
+                if i > 0:
+                    # Calculate where the previous segment ended in action time
+                    prev_segment = speed_data[i-1]
+                    prev_duration = (prev_segment['end_frame'] - prev_segment['start_frame']) * prev_segment['speed_multiplier']
+                    action_offset = (prev_duration / action_length) % 1.0
+                    strip.action_frame_start = main_action.frame_range[0] + (action_offset * action_length)
+            
+            print(f"Created speed strip: {strip_name} (frames {start_frame}-{end_frame}, speed {speed_multiplier:.2f}x)")
+            strips_created += 1
+        
+        # Handle end pose if different from start
+        if (end_pose_name != "NONE" and end_pose_name != start_pose_name):
+            _create_end_pose_overlay(target_obj, path_obj, end_pose_name, speed_data[-1]['end_frame'])
+        
+        print(f"Successfully created {strips_created} speed-matched NLA strips")
+        return True
+        
+    except Exception as e:
+        print(f"Error creating speed-matched NLA strips: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def _create_base_pose_track(target_obj, path_obj, start_pose_name):
+    """Create base pose track for the full duration"""
+    path_name = path_obj.name
+    base_track_name = f"LAA_{path_name}_BasePose"
+    
+    # Find or create base track
+    base_track = None
+    for track in target_obj.animation_data.nla_tracks:
+        if track.name == base_track_name:
+            base_track = track
+            break
+    
+    if not base_track:
+        base_track = target_obj.animation_data.nla_tracks.new()
+        base_track.name = base_track_name
+    
+    # Clear existing strips
+    for strip in list(base_track.strips):
+        base_track.strips.remove(strip)
+    
+    # Add start pose
+    start_action = get_pose_action(start_pose_name)
+    if start_action:
+        # Get total duration from path
+        start_frame = path_obj.get("start_frame", 1)
+        end_frame = path_obj.get("end_frame", 100)
+        
+        start_strip = base_track.strips.new(f"{path_name}_BasePose", start_frame, start_action)
+        start_strip.frame_end = end_frame
+        start_strip.blend_type = 'COMBINE'
+        start_strip.extrapolation = 'HOLD'
+        print(f"Created base pose track: {base_track_name}")
+    
+    return base_track
+
+
+def _create_end_pose_overlay(target_obj, path_obj, end_pose_name, final_frame):
+    """Create end pose overlay for blending"""
+    path_name = path_obj.name
+    end_blend_frames = path_obj.get("end_blend_frames", 5)
+    
+    if end_blend_frames <= 0:
+        return
+    
+    end_action = get_pose_action(end_pose_name)
+    if not end_action:
+        return
+    
+    # Create end pose track
+    end_track_name = f"LAA_{path_name}_EndPose"
+    end_track = target_obj.animation_data.nla_tracks.new()
+    end_track.name = end_track_name
+    
+    # Position end pose to blend in during final frames
+    end_start = final_frame - end_blend_frames
+    end_strip = end_track.strips.new(f"{path_name}_EndPose", end_start, end_action)
+    end_strip.frame_end = final_frame
+    end_strip.blend_type = 'ADD'
+    end_strip.extrapolation = 'HOLD'
+    end_strip.blend_in = end_blend_frames
+    
+    print(f"Created end pose overlay from frame {end_start} to {final_frame}")
+
+
+def convert_speed_data_to_segments(speed_curve_data, start_frame, end_frame, min_segment_frames=10):
+    """
+    Convert your relative speed data into segments for NLA strips.
+    
+    speed_curve_data: dict with frame->speed mappings from your speed control system
+    min_segment_frames: minimum frames per segment to avoid too many tiny strips
+    """
+    if not speed_curve_data:
+        return []
+    
+    segments = []
+    frames = sorted(speed_curve_data.keys())
+    
+    if not frames:
+        return []
+    
+    current_segment_start = start_frame
+    current_speed = speed_curve_data[frames[0]]
+    speed_tolerance = 0.1  # How much speed can vary within a segment
+    
+    for i, frame in enumerate(frames[1:], 1):
+        frame_speed = speed_curve_data[frame]
+        
+        # Check if speed has changed significantly or we've reached minimum segment length
+        speed_change = abs(frame_speed - current_speed)
+        segment_length = frame - current_segment_start
+        
+        if (speed_change > speed_tolerance and segment_length >= min_segment_frames) or frame == frames[-1]:
+            # End current segment
+            segment_end = frame if frame != frames[-1] else end_frame
+            
+            segments.append({
+                'start_frame': current_segment_start,
+                'end_frame': segment_end,
+                'speed_multiplier': current_speed,
+                'blend_frames': 3  # Small blend between segments
+            })
+            
+            # Start new segment
+            current_segment_start = frame
+            current_speed = frame_speed
+    
+    # Ensure we don't have overlapping segments
+    for i in range(len(segments) - 1):
+        if segments[i]['end_frame'] >= segments[i+1]['start_frame']:
+            segments[i]['end_frame'] = segments[i+1]['start_frame']
+    
+    print(f"Created {len(segments)} speed segments from speed data")
+    return segments
+
 # Initialize the library on import
 def initialize_library():
     """Initialize the animation library"""
