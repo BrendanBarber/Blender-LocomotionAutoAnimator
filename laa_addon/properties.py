@@ -224,7 +224,7 @@ class AnimationPathProperties(PropertyGroup):
     use_speed_matched_animation: bpy.props.BoolProperty(
         name="Speed-Matched Animation",
         description="Use multiple NLA strips with different playback speeds instead of single strip",
-        default=False
+        default=True
     )
 
 classes = [

@@ -362,21 +362,23 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             if not offset_fcurve:
                 return speed_data
             
-            # Sample the curve to get speed at each frame
+            # First pass: find the maximum speed
+            max_speed = 0
+            for frame in range(start_frame, end_frame + 1):
+                current_offset = offset_fcurve.evaluate(frame)
+                next_offset = offset_fcurve.evaluate(frame + 1)
+                speed = abs(next_offset - current_offset)
+                max_speed = max(max_speed, speed)
+
+            # Second pass: normalize using max speed
             for frame in range(start_frame, end_frame + 1):
                 current_offset = offset_fcurve.evaluate(frame)
                 next_offset = offset_fcurve.evaluate(frame + 1)
                 
-                # Calculate speed as change in offset per frame
                 speed = abs(next_offset - current_offset)
+                normalized_speed = speed / max_speed  # Max speed becomes 1.0
                 
-                # Normalize speed (you may need to adjust this based on your setup)
-                # This assumes normal speed is around 0.01 offset units per frame
-                normalized_speed = speed / 0.01
-                
-                # Clamp to reasonable range
                 normalized_speed = max(0.1, min(normalized_speed, 3.0))
-                
                 speed_data[frame] = normalized_speed
             
             print(f"Extracted speed data for {len(speed_data)} frames")
