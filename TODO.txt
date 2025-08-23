@@ -1,3 +1,2 @@
-BUG: Animation it glitchy on tight-turns with speed-changing.
-
 FEATURE: Add back in speed up and slow down at beginning and end depending on the number of blend frames
+FEATURE: Ability to change the base speed of a main animation

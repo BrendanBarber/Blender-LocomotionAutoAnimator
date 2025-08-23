@@ -7,6 +7,10 @@ import bmesh
 import math
 from mathutils import Vector
 
+#DEBUG
+import json
+import os
+
 def clear_selective_animation(target_obj, start_frame, end_frame, path_obj=None):
     """
     Clear animation data for path animations using a hybrid approach:
@@ -804,6 +808,24 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
             speed_info = f"with curvature control ({min_speed_factor:.1f}x-{max_speed_factor:.1f}x) - {len(dense_points)} dense keyframes"
         
         print("Speed control applied successfully!")
+
+        '''animation_data = {
+            "start_frame": start_frame,
+            "end_frame": end_frame, 
+            "total_frames": end_frame - start_frame,
+            "keyframes": dense_points
+        }
+            
+        export_filepath = export_curvature_debug_data(
+            positions=positions,
+            curvatures=curvatures,
+            speeds=speeds,
+            smoothed_curvatures=smoothed_curvatures,
+            thresholded_curvatures=thresholded_curvatures,
+            curve_name=curve_obj.name,
+            animation_data=animation_data  # Add this parameter
+        )'''
+
         return True
         
     except Exception as e:
@@ -811,3 +833,76 @@ def apply_speed_control(follow_path_constraint, curve_obj, start_frame, end_fram
         import traceback
         traceback.print_exc()
         return False
+
+def export_curvature_debug_data(positions, curvatures, speeds=None, smoothed_curvatures=None, 
+                               thresholded_curvatures=None, curve_name="curve", 
+                               export_path=None, animation_data=None):
+    """
+    Export curvature analysis data to JSON file for external visualization.
+    Call this from within your apply_speed_control function.
+    
+    Args:
+        positions: List of 3D Vector positions along the curve
+        curvatures: Raw curvature values
+        speeds: Optional speed values calculated from curvatures
+        smoothed_curvatures: Optional smoothed curvature values
+        thresholded_curvatures: Optional thresholded curvature values
+        curve_name: Name for the curve (used in filename)
+        export_path: Optional custom export path, defaults to Blender file directory
+        animation_data: Dict with keys 'start_frame', 'end_frame', 'keyframes' (list of (frame, position) tuples)
+    """
+    
+    try:
+        # Determine export path
+        if export_path is None:
+            # Try to use Blender file directory, fallback to temp
+            import bpy
+            blend_filepath = bpy.data.filepath
+            if blend_filepath:
+                export_path = os.path.dirname(blend_filepath)
+            else:
+                import tempfile
+                export_path = tempfile.gettempdir()
+        
+        # Convert Vector positions to simple lists for JSON serialization
+        positions_data = []
+        for pos in positions:
+            positions_data.append([float(pos.x), float(pos.y), float(pos.z)])
+        
+        # Prepare data dictionary
+        debug_data = {
+            "curve_name": curve_name,
+            "export_timestamp": str(bpy.context.scene.frame_current) if 'bpy' in globals() else "unknown",
+            "positions": positions_data,
+            "curvatures": {
+                "raw": [float(c) for c in curvatures],
+                "smoothed": [float(c) for c in smoothed_curvatures] if smoothed_curvatures else None,
+                "thresholded": [float(c) for c in thresholded_curvatures] if thresholded_curvatures else None
+            },
+            "speeds": [float(s) for s in speeds] if speeds else None,
+            "animation_data": animation_data,  # New: animation keyframe data
+            "statistics": {
+                "total_points": len(positions),
+                "curvature_range": [float(min(curvatures)), float(max(curvatures))],
+                "mean_curvature": float(sum(curvatures) / len(curvatures)),
+                "points_above_threshold": sum(1 for c in curvatures if c > 0.001)  # Assuming default threshold
+            }
+        }
+        
+        # Export to JSON file
+        filename = f"curvature_debug_{curve_name.replace(' ', '_')}.json"
+        filepath = os.path.join(export_path, filename)
+        
+        with open(filepath, 'w') as f:
+            json.dump(debug_data, f, indent=2)
+        
+        print(f"Debug data exported to: {filepath}")
+        print(f"Run the visualization script with: python visualize_curvature.py \"{filepath}\"")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"Error exporting debug data: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
