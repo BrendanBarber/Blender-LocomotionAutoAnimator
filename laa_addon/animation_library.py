@@ -21,6 +21,43 @@ def get_animations_subfolder():
     """Get the path to the animations subfolder"""
     return get_animations_folder() / "animations"
 
+def get_action_loop_range(action, default_length=None):
+    """
+    Get the intended loop range for an action, using custom properties or fallback methods.
+    
+    Priority:
+    1. Custom properties: action["loop_start"] and action["loop_end"] (from scene timeline)
+    2. Action frame_range as fallback
+    3. Default length if provided
+    """
+    if not action:
+        return 0, default_length or 100
+    
+    # Method 1: Check for custom properties defining loop range (set from scene timeline)
+    if "loop_start" in action and "loop_end" in action:
+        loop_start = action["loop_start"]
+        loop_end = action["loop_end"]
+        print(f"Using scene timeline range from action properties: {loop_start}-{loop_end}")
+        return loop_start, loop_end
+    
+    # Method 2: Use action's full keyframe range (fallback)
+    action_start, action_end = action.frame_range
+    print(f"Using action keyframe range (fallback): {action_start}-{action_end}")
+    
+    # Method 3: Apply default length if keyframe range seems too long
+    if default_length and (action_end - action_start) > default_length * 2:
+        print(f"Action range ({action_end - action_start} frames) seems too long, using default length {default_length}")
+        return action_start, action_start + default_length
+    
+    return action_start, action_end
+
+def set_action_loop_range(action, loop_start, loop_end):
+    """Set custom loop range properties on an action"""
+    if action:
+        action["loop_start"] = loop_start
+        action["loop_end"] = loop_end
+        print(f"Set loop range for action '{action.name}': {loop_start}-{loop_end}")
+
 def scan_animation_library():
     """Scan the animation library and populate caches"""
     global _poses_cache, _animations_cache, _cache_initialized
@@ -122,8 +159,8 @@ def get_available_animations(self, context):
     
     return result
 
-def load_action_from_file(filename, is_pose=True):
-    """Load an action from a blend file and cache it"""
+def load_action_from_file(filename, is_pose=True, default_loop_length=None):
+    """Load an action from a blend file and cache it, preserving scene timeline info"""
     global _action_cache
     
     # Check cache first
@@ -146,7 +183,33 @@ def load_action_from_file(filename, is_pose=True):
         # Store current actions to detect new ones
         existing_actions = set(bpy.data.actions.keys())
         
-        # Append from the blend file
+        # First, get the scene timeline info from the blend file
+        scene_frame_start = None
+        scene_frame_end = None
+        
+        # Store existing scenes to detect new ones
+        existing_scenes = set(bpy.data.scenes.keys())
+        
+        with bpy.data.libraries.load(str(file_path)) as (data_from, data_to):
+            # Load scenes to get timeline info
+            if data_from.scenes:
+                print(f"Available scenes in {filename}: {data_from.scenes}")
+                data_to.scenes = [data_from.scenes[0]]  # Load first scene
+        
+        # Extract timeline info from newly loaded scene
+        new_scenes = set(bpy.data.scenes.keys()) - existing_scenes
+        if new_scenes:
+            loaded_scene_name = list(new_scenes)[0]
+            loaded_scene = bpy.data.scenes[loaded_scene_name]
+            scene_frame_start = loaded_scene.frame_start
+            scene_frame_end = loaded_scene.frame_end
+            print(f"Found scene timeline in {filename}: start={scene_frame_start}, end={scene_frame_end}")
+            # Remove the temporary scene
+            bpy.data.scenes.remove(loaded_scene)
+        else:
+            print(f"Warning: Could not find loaded scene for {filename}")
+        
+        # Now load the action
         with bpy.data.libraries.load(str(file_path)) as (data_from, data_to):
             # Look for action with same name as file
             if filename in data_from.actions:
@@ -163,6 +226,20 @@ def load_action_from_file(filename, is_pose=True):
         if new_actions:
             action_name = list(new_actions)[0]
             loaded_action = bpy.data.actions[action_name]
+            
+            # Debug: show the action's actual keyframe range
+            action_keyframe_start, action_keyframe_end = loaded_action.frame_range
+            print(f"Action keyframe range: {action_keyframe_start}-{action_keyframe_end}")
+            
+            # Store the scene timeline info on the action
+            if scene_frame_start is not None and scene_frame_end is not None:
+                set_action_loop_range(loaded_action, scene_frame_start, scene_frame_end)
+                print(f"Stored scene timeline as loop range: {scene_frame_start}-{scene_frame_end}")
+            elif not is_pose and default_loop_length:
+                # Fallback to default if no scene info found
+                if "loop_start" not in loaded_action and "loop_end" not in loaded_action:
+                    set_action_loop_range(loaded_action, action_keyframe_start, action_keyframe_start + default_loop_length)
+                    print(f"Set fallback loop range: {action_keyframe_start}-{action_keyframe_start + default_loop_length}")
             
             # Cache the action
             _action_cache[cache_key] = loaded_action
@@ -182,11 +259,11 @@ def get_pose_action(pose_name):
         return None
     return load_action_from_file(pose_name, is_pose=True)
 
-def get_animation_action(anim_name):
+def get_animation_action(anim_name, default_loop_length=None):
     """Get an animation action by name"""
     if anim_name == "NONE" or anim_name.endswith("_MISSING"):
         return None
-    return load_action_from_file(anim_name, is_pose=False)
+    return load_action_from_file(anim_name, is_pose=False, default_loop_length=default_loop_length)
 
 def clear_action_cache():
     """Clear the action cache"""
@@ -214,6 +291,9 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
     end_pose_name = path_obj.get("end_pose", "NONE") 
     anim_name = path_obj.get("anim", "NONE")
     path_name = path_obj.name
+    
+    # Get default loop length from path object (for newly loaded actions)
+    default_loop_length = path_obj.get("default_loop_length", 30)  # 30 frames default
     
     # Ensure target has animation data
     if not target_obj.animation_data:
@@ -247,17 +327,21 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
             print("No animation specified - skipping discrete speed strips")
             return False
             
-        main_action = get_animation_action(anim_name)
+        main_action = get_animation_action(anim_name, default_loop_length)
         if not main_action:
             print(f"Could not load animation: {anim_name}")
             return False
         
-        # Get action properties
-        action_start = main_action.frame_range[0]
-        action_end = main_action.frame_range[1]
-        action_length = action_end - action_start
+        # Get action loop range (this is the key fix!)
+        scene_start, scene_end = get_action_loop_range(main_action, default_loop_length)
+        action_length = scene_end - scene_start
         
-        print(f"Animation '{anim_name}': {action_start}-{action_end} ({action_length} frames)")
+        # For NLA strips, we always want to use the scene timeline bounds as the action range
+        # But the loop length calculation should be based on the scene timeline duration
+        action_start = scene_start
+        action_end = scene_end
+        
+        print(f"Animation '{anim_name}': scene timeline {scene_start}-{scene_end} ({action_length} frames)")
         
         # Get blend frame settings from path object
         start_blend_frames = path_obj.get("start_blend_frames", 5)
@@ -292,7 +376,7 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
             # Set playback scale (higher = slower, lower = faster)
             strip.scale = 1.0 / speed
             
-            # Set action frame range - always use the full loop
+            # Set action frame range - use the defined loop range, not full keyframe range
             strip.action_frame_start = action_start
             strip.action_frame_end = action_end
             
@@ -306,14 +390,21 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
             
             # Apply blend frames only to first and last strips
             if i == 0:
-                # First strip gets start blend
-                strip.blend_in = start_blend_frames
+                # First strip gets start blend (only if start pose is defined)
+                if start_pose_name != "NONE":
+                    strip.blend_in = start_blend_frames
+                else:
+                    strip.blend_in = 0
             elif i == len(speed_changes) - 1:
-                # Last strip gets end blend
-                strip.blend_out = end_blend_frames
+                # Last strip gets end blend (only if end pose is defined)
+                if end_pose_name != "NONE":
+                    strip.blend_out = end_blend_frames
+                else:
+                    strip.blend_out = 0
             
             print(f"Created strip: {strip_name}")
             print(f"  Timeline: {strip.frame_start}-{strip.frame_end} ({strip.frame_end - strip.frame_start + 1} frames)")
+            print(f"  Action range: {strip.action_frame_start}-{strip.action_frame_end}")
             print(f"  Speed: {speed:.2f}x (1 complete loop)")
             print(f"  Scale: {strip.scale:.3f}")
             if i == 0 and start_blend_frames > 0:

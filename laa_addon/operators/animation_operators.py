@@ -8,7 +8,7 @@ import math
 from mathutils import Vector
 from bpy.types import Operator
 
-from .animation_operators_utils import clear_selective_animation, apply_speed_control, store_keyframe_tracking_data, get_constraint_keyframe_frames
+from .animation_operators_utils import clear_selective_animation, apply_speed_control, store_keyframe_tracking_data, get_constraint_keyframe_frames, push_down_action_manual
 
 class ANIMPATH_OT_animate_object_along_path(Operator):
     """Animate the assigned object along the selected path using Follow Path constraint and apply poses/animations"""
@@ -238,6 +238,14 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             self._apply_rig_animations(target_obj, path_obj, start_frame, end_frame,
                                      start_pose, end_pose, main_anim,
                                      start_blend_frames, end_blend_frames)
+
+            # Push down Action
+            if animation_target and animation_target.animation_data and animation_target.animation_data.action:
+                success = push_down_action_manual(animation_target)
+                if success:
+                    print(f"Successfully pushed down action for {animation_target.name}")
+                else:
+                    print(f"Failed to push down action for {animation_target.name}")
             
             context.scene.frame_set(start_frame)
             
@@ -529,103 +537,9 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                 return spline.bezier_points[-1].co
         return None
 
-
-class ANIMPATH_OT_apply_rig_animations_only(Operator):
-    """Apply only the poses and animations to the rig without path animation"""
-    bl_idname = "animpath.apply_rig_animations_only"
-    bl_label = "Apply Rig Animations Only"
-    bl_options = {'REGISTER', 'UNDO'}
-    
-    def execute(self, context):
-        path_obj = context.active_object
-        
-        if not path_obj or not path_obj.get("is_animation_path"):
-            self.report({'ERROR'}, "No Animation Path selected")
-            return {'CANCELLED'}
-        
-        target_obj_name = path_obj.get("target_object")
-        if not target_obj_name:
-            self.report({'ERROR'}, "No target object assigned to this path")
-            return {'CANCELLED'}
-        
-        target_obj = bpy.data.objects.get(target_obj_name)
-        if not target_obj:
-            self.report({'ERROR'}, f"Target object '{target_obj_name}' not found")
-            return {'CANCELLED'}
-        
-        try:
-            # Get animation properties
-            start_frame = path_obj.get("start_frame", 1)
-            end_frame = path_obj.get("end_frame", 100)
-            start_pose = path_obj.get("start_pose", "NONE")
-            end_pose = path_obj.get("end_pose", "NONE")
-            main_anim = path_obj.get("anim", "NONE")
-            start_blend_frames = path_obj.get("start_blend_frames", 5)
-            end_blend_frames = path_obj.get("end_blend_frames", 5)
-            
-            # Find the armature - either the target object itself or a child
-            armature_obj = self._find_armature(target_obj)
-            
-            if not armature_obj:
-                self.report({'ERROR'}, f"No armature found for {target_obj.name}")
-                return {'CANCELLED'}
-            
-            print(f"Applying animations to armature: {armature_obj.name}")
-            
-            # Import animation library functions
-            try:
-                from . import animation_library
-            except ImportError:
-                try:
-                    import animation_library
-                except ImportError:
-                    self.report({'ERROR'}, "Animation library not available")
-                    return {'CANCELLED'}
-            
-            # Create NLA strips for the armature
-            success = animation_library.create_nla_strips_for_path(armature_obj, path_obj)
-            
-            if success:
-                self.report({'INFO'}, f"Successfully applied poses/animations to {armature_obj.name}")
-            else:
-                self.report({'WARNING'}, f"Failed to apply poses/animations to {armature_obj.name}")
-            
-        except Exception as e:
-            self.report({'ERROR'}, f"Error applying rig animations: {str(e)}")
-            return {'CANCELLED'}
-        
-        return {'FINISHED'}
-    
-    def _find_armature(self, target_obj):
-        """Find an armature object - either the target itself or its child"""
-        # Check if target is an armature
-        if target_obj.type == 'ARMATURE':
-            return target_obj
-        
-        # Check direct children for armature
-        for child in target_obj.children:
-            if child.type == 'ARMATURE':
-                return child
-        
-        # Check if target has an armature modifier pointing to an armature
-        if hasattr(target_obj, 'modifiers'):
-            for modifier in target_obj.modifiers:
-                if modifier.type == 'ARMATURE' and modifier.object:
-                    return modifier.object
-        
-        # Recursively check children's children (one level deep)
-        for child in target_obj.children:
-            for grandchild in child.children:
-                if grandchild.type == 'ARMATURE':
-                    return grandchild
-        
-        return None
-
-
 # List of classes to register
 classes = [
     ANIMPATH_OT_animate_object_along_path,
-    ANIMPATH_OT_apply_rig_animations_only,
 ]
 
 def register():

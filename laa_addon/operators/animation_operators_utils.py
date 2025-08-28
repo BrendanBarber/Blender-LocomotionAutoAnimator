@@ -176,6 +176,50 @@ def _cleanup_hybrid_animation_data(target_obj, path_obj, start_frame, end_frame)
     
     return cleanup_performed
 
+def push_down_action_manual(obj):
+    """Manually push down action - equivalent to the button"""
+    if not obj or not obj.animation_data or not obj.animation_data.action:
+        return False
+    
+    anim_data = obj.animation_data
+    action = anim_data.action
+    
+    # Get frame range from action
+    frame_start = int(action.frame_range[0])
+    frame_end = int(action.frame_range[1])
+    
+    # Create NLA track if none exists
+    if not anim_data.nla_tracks:
+        track = anim_data.nla_tracks.new()
+        track.name = "LAA_Motion"
+    else:
+        # Use the last track or create new one if needed
+        track = anim_data.nla_tracks[-1]
+        
+        # Check if we need a new track (if current one has conflicting strips)
+        if track.strips:
+            last_strip_end = max(strip.frame_end for strip in track.strips)
+            if last_strip_end >= frame_start:
+                track = anim_data.nla_tracks.new()
+                track.name = f"Motion.{len(anim_data.nla_tracks):03d}"
+    
+    # Create the strip
+    strip = track.strips.new(
+        name=action.name,
+        start=frame_start,
+        action=action
+    )
+    
+    # Set strip properties to match "Push Down" behavior
+    strip.blend_type = 'REPLACE'
+    strip.influence = 1.0
+    strip.use_auto_blend = False
+    
+    # Clear the active action (this is what "Push Down" does)
+    anim_data.action = None
+    
+    return True
+
 def store_keyframe_tracking_data(path_obj, target_obj, constraint_name, keyframe_data):
     """
     Store tracking data for keyframes created by this path animation.
