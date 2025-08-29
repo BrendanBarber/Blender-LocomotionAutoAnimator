@@ -12,7 +12,7 @@ class AnimationPath:
     """Manages animated movement paths with pose blending."""
     
     def __init__(self, start_pos, start_frame, end_pos, end_frame, 
-                 start_pose, end_pose, anim, start_blend_frames=0, end_blend_frames=0):
+                 start_pose, end_pose, anim, start_blend_frames=0, end_blend_frames=0, anim_speed_mult=1.0):
         self.start_pos = Vector(start_pos) if not isinstance(start_pos, Vector) else start_pos
         self.start_frame = start_frame
         self.end_pos = Vector(end_pos) if not isinstance(end_pos, Vector) else end_pos
@@ -22,6 +22,7 @@ class AnimationPath:
         self.anim = anim
         self.start_blend_frames = start_blend_frames
         self.end_blend_frames = end_blend_frames
+        self.anim_speed_mult = anim_speed_mult
         
         if start_frame >= end_frame:
             raise ValueError("start_frame must be less than end_frame")
@@ -116,6 +117,7 @@ class AnimationPath:
         curve_obj["anim"] = self.anim
         curve_obj["start_blend_frames"] = self.start_blend_frames
         curve_obj["end_blend_frames"] = self.end_blend_frames
+        curve_obj["anim_speed_mult"] = self.anim_speed_mult
         curve_obj["is_animation_path"] = True
         curve_obj["laa_path_parent"] = parent_empty.name
         
@@ -260,7 +262,8 @@ class AnimationPath:
                 f"end_pos={self.end_pos}, end_frame={self.end_frame}, "
                 f"start_pose={self.start_pose}, end_pose={self.end_pose}, "
                 f"anim={self.anim}, start_blend_frames={self.start_blend_frames}, "
-                f"end_blend_frames={self.end_blend_frames})")
+                f"end_blend_frames={self.end_blend_frames}, "
+                f"anim_speed_mult={self.anim_speed_mult})")
 
 
 def create_animation_path_from_properties(context):
@@ -276,7 +279,8 @@ def create_animation_path_from_properties(context):
         end_pose=props.end_pose,
         anim=props.anim,
         start_blend_frames=props.start_blend_frames,
-        end_blend_frames=props.end_blend_frames
+        end_blend_frames=props.end_blend_frames,
+        anim_speed_mult=props.anim_speed_mult
     )
     
     return path

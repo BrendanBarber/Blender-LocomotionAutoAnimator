@@ -142,11 +142,14 @@ class ANIMPATH_PT_animation_settings(Panel):
         col.label(text="Blend Settings:")
         col.prop(props, "start_blend_frames")
         col.prop(props, "end_blend_frames")
-        
+
         total_frames = props.end_frame - props.start_frame
         total_blend = props.start_blend_frames + props.end_blend_frames
         if total_blend > total_frames:
             col.label(text="⚠ Blend frames exceed path duration", icon='ERROR')
+
+        col.label(text="Speed Multiplier")
+        col.prop(props, "anim_speed_mult")
 
 
 class ANIMPATH_PT_object_animation(Panel):

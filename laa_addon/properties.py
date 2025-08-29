@@ -126,6 +126,15 @@ class AnimationPathProperties(PropertyGroup):
         min=0,
         update=property_update_callback
     )
+
+    anim_speed_mult: FloatProperty(
+        name="Animation Speed Multiplier",
+        description="Change the base speed of the main animation, 1x is normal speed.",
+        default=1.0,
+        min=0.1,
+        max=10.0,
+        update=property_update_callback
+    )
     
     target_object: PointerProperty(
         name="Target Object",

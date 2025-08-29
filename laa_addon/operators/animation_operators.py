@@ -66,7 +66,38 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             if props.clear_existing_animation:
                 # Use the new precise clearing with path object
                 clear_selective_animation(target_obj, start_frame, end_frame, path_obj)
-            
+
+            # Always perform constraint Removal
+            constraint_name = f"FollowPath_{path_obj.name}"
+            constraints_to_remove = []
+
+            for constraint in target_obj.constraints:
+                if (constraint.type == 'FOLLOW_PATH' and 
+                    constraint.target == path_obj):
+                    constraints_to_remove.append(constraint)
+                # Also check by name pattern as backup
+                elif (constraint.type == 'FOLLOW_PATH' and 
+                      constraint.name == constraint_name):
+                    constraints_to_remove.append(constraint)
+
+            for constraint in constraints_to_remove:
+                print(f"Removing existing FollowPath constraint: {constraint.name}")
+                target_obj.constraints.remove(constraint)
+
+            # Also clean up any orphaned constraint keyframes
+            if target_obj.animation_data and target_obj.animation_data.action:
+                action = target_obj.animation_data.action
+                fcurves_to_remove = []
+                
+                for fcurve in action.fcurves:
+                    if (fcurve.data_path.startswith('constraints[') and 
+                        f'"{constraint_name}"' in fcurve.data_path):
+                        fcurves_to_remove.append(fcurve)
+                
+                for fcurve in fcurves_to_remove:
+                    action.fcurves.remove(fcurve)
+                    print(f"Removed orphaned constraint fcurve: {fcurve.data_path}")
+
             # Create Follow Path constraint for object movement
             follow_path = target_obj.constraints.new(type='FOLLOW_PATH')
             follow_path.target = path_obj
@@ -241,7 +272,7 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
 
             # Push down Action
             if animation_target and animation_target.animation_data and animation_target.animation_data.action:
-                success = push_down_action_manual(animation_target)
+                success = push_down_action_manual(animation_target, path_obj)
                 if success:
                     print(f"Successfully pushed down action for {animation_target.name}")
                 else:
@@ -324,22 +355,6 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                         return
                     else:
                         print("Speed-matched strips failed, falling back to regular NLA")
-        
-        # Fallback to your existing NLA system
-        if armature_obj == target_obj:
-            existing_action = None
-            if target_obj.animation_data and target_obj.animation_data.action:
-                existing_action = target_obj.animation_data.action
-                
-            from .. import animation_library
-            success = animation_library.create_nla_strips_for_path(armature_obj, path_obj)
-            
-            if existing_action and target_obj.animation_data:
-                target_obj.animation_data.action = existing_action
-        else:
-            from .. import animation_library
-            success = animation_library.create_nla_strips_for_path(armature_obj, path_obj)
-
 
     def _extract_speed_data_from_constraint(self, target_obj, path_obj, start_frame, end_frame):
         """Extract speed data from the Follow Path constraint keyframes"""

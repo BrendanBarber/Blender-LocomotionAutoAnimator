@@ -176,8 +176,8 @@ def _cleanup_hybrid_animation_data(target_obj, path_obj, start_frame, end_frame)
     
     return cleanup_performed
 
-def push_down_action_manual(obj):
-    """Manually push down action - equivalent to the button"""
+def push_down_action_manual(obj, path_obj):
+    """Manually push down action equivalent to the button in NLA Editor"""
     if not obj or not obj.animation_data or not obj.animation_data.action:
         return False
     
@@ -191,17 +191,17 @@ def push_down_action_manual(obj):
     # Create NLA track if none exists
     if not anim_data.nla_tracks:
         track = anim_data.nla_tracks.new()
-        track.name = "LAA_Motion"
+        track.name = f"LAA_{path_obj.name}_Motion"
     else:
         # Use the last track or create new one if needed
         track = anim_data.nla_tracks[-1]
         
-        # Check if we need a new track (if current one has conflicting strips)
+        # Check if we need a new track
         if track.strips:
             last_strip_end = max(strip.frame_end for strip in track.strips)
             if last_strip_end >= frame_start:
                 track = anim_data.nla_tracks.new()
-                track.name = f"Motion.{len(anim_data.nla_tracks):03d}"
+                track.name = f"LAA_{path_obj.name}_Motion.{len(anim_data.nla_tracks):03d}"
     
     # Create the strip
     strip = track.strips.new(
@@ -210,12 +210,12 @@ def push_down_action_manual(obj):
         action=action
     )
     
-    # Set strip properties to match "Push Down" behavior
+    # Set strip properties to match "Push Down" behavior in the editor
     strip.blend_type = 'REPLACE'
     strip.influence = 1.0
     strip.use_auto_blend = False
     
-    # Clear the active action (this is what "Push Down" does)
+    # Clear the active action
     anim_data.action = None
     
     return True

@@ -91,7 +91,8 @@ def update_path_from_properties(context):
             end_pose=props.end_pose,
             anim=props.anim,
             start_blend_frames=props.start_blend_frames,
-            end_blend_frames=props.end_blend_frames
+            end_blend_frames=props.end_blend_frames,
+            anim_speed_mult=props.anim_speed_mult
         )
         
         # Update path object properties
@@ -102,6 +103,7 @@ def update_path_from_properties(context):
         path_obj["anim"] = path.anim
         path_obj["start_blend_frames"] = path.start_blend_frames
         path_obj["end_blend_frames"] = path.end_blend_frames
+        path_obj["anim_speed_mult"] = path.anim_speed_mult
         path_obj["use_rotation"] = props.use_rotation
         path_obj["object_z_offset"] = props.object_z_offset
         

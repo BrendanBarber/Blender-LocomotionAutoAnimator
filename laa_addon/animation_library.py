@@ -346,6 +346,9 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
         # Get blend frame settings from path object
         start_blend_frames = path_obj.get("start_blend_frames", 5)
         end_blend_frames = path_obj.get("end_blend_frames", 5)
+
+        # Get speed mult
+        anim_speed_mult = path_obj.get("anim_speed_mult", 1.0)
         
         # Convert speed segments into discrete speed changes
         speed_changes = _calculate_discrete_speed_changes(speed_data, action_length)
@@ -374,7 +377,7 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
             strip = nla_track.strips.new(strip_name, int(timeline_start), main_action)
             
             # Set playback scale (higher = slower, lower = faster)
-            strip.scale = 1.0 / speed
+            strip.scale = 1.0 / (speed * anim_speed_mult)
             
             # Set action frame range - use the defined loop range, not full keyframe range
             strip.action_frame_start = action_start

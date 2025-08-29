@@ -111,7 +111,8 @@ class ANIMPATH_OT_update_path(Operator):
                 end_pose=props.end_pose,
                 anim=props.anim,
                 start_blend_frames=props.start_blend_frames,
-                end_blend_frames=props.end_blend_frames
+                end_blend_frames=props.end_blend_frames,
+                anim_speed_mult=props.anim_speed_mult
             )
             
             obj["start_frame"] = path.start_frame
@@ -121,6 +122,7 @@ class ANIMPATH_OT_update_path(Operator):
             obj["anim"] = path.anim
             obj["start_blend_frames"] = path.start_blend_frames
             obj["end_blend_frames"] = path.end_blend_frames
+            obj["anim_speed_mult"] = path.anim_speed_mult
             obj["object_z_offset"] = props.object_z_offset
             
             # Update curve data's path_duration
@@ -270,6 +272,8 @@ class ANIMPATH_OT_delete_path(Operator):
     def _cleanup_object_animation(self, target_obj, path_name, path_obj):
         """Clean up Follow Path constraints and related keyframes"""
         cleanup_performed = False
+
+        print("*********************************************************************************************************")
         
         try:
             # Get frame range from path object
@@ -427,6 +431,7 @@ class ANIMPATH_OT_load_path_to_properties(Operator):
         props.anim = obj.get("anim", "walk")
         props.start_blend_frames = obj.get("start_blend_frames", 0)
         props.end_blend_frames = obj.get("end_blend_frames", 0)
+        props.anim_speed_mult = obj.get("anim_speed_mult", 1.0)
         props.use_rotation = obj.get("use_rotation", True)
         props.object_z_offset = obj.get("object_z_offset", 0.0)
         
