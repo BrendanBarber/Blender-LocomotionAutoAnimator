@@ -13,11 +13,7 @@ class ANIMPATH_OT_refresh_animation_library(Operator):
     
     def execute(self, context):
         try:
-            # Import animation library
-            try:
-                from .. import animation_library
-            except ImportError:
-                import animation_library
+            from .. import animation_library
             
             animation_library.refresh_animation_library()
             
@@ -44,11 +40,7 @@ class ANIMPATH_OT_clear_animation_cache(Operator):
     
     def execute(self, context):
         try:
-            # Import animation library
-            try:
-                from .. import animation_library
-            except ImportError:
-                import animation_library
+            from .. import animation_library
             
             animation_library.clear_action_cache()
             self.report({'INFO'}, "Animation cache cleared")
@@ -152,11 +144,7 @@ class ANIMPATH_OT_validate_animation_library(Operator):
     
     def execute(self, context):
         try:
-            # Import animation library
-            try:
-                from .. import animation_library
-            except ImportError:
-                import animation_library
+            from .. import animation_library
             
             # Get available poses and animations
             poses = animation_library.get_available_poses(None, context)

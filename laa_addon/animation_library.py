@@ -342,10 +342,6 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
         action_end = scene_end
         
         print(f"Animation '{anim_name}': scene timeline {scene_start}-{scene_end} ({action_length} frames)")
-        
-        # Get blend frame settings from path object
-        start_blend_frames = path_obj.get("start_blend_frames", 5)
-        end_blend_frames = path_obj.get("end_blend_frames", 5)
 
         # Get speed mult
         anim_speed_mult = path_obj.get("anim_speed_mult", 1.0)
@@ -361,8 +357,8 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
         strips_created = 0
         
         # Get blend frame settings from the first segment or use defaults
-        start_blend_frames = speed_data[0].get('start_blend_frames', 5) if speed_data else 5
-        end_blend_frames = speed_data[0].get('end_blend_frames', 5) if speed_data else 5
+        start_blend_frames = path_obj.get("start_blend_frames", 5)
+        end_blend_frames = path_obj.get("end_blend_frames", 5)
         
         for i, change in enumerate(speed_changes):
             timeline_start = change['timeline_start']
@@ -398,7 +394,7 @@ def create_discrete_speed_nla_strips(target_obj, path_obj, speed_data):
                     strip.blend_in = start_blend_frames
                 else:
                     strip.blend_in = 0
-            elif i == len(speed_changes) - 1:
+            if i == len(speed_changes) - 1:
                 # Last strip gets end blend (only if end pose is defined)
                 if end_pose_name != "NONE":
                     strip.blend_out = end_blend_frames
@@ -641,7 +637,7 @@ def convert_speed_data_to_segments(speed_curve_data, start_frame, end_frame, min
                     'start_frame': current_segment_start,
                     'end_frame': segment_end,
                     'speed_multiplier': current_speed,
-                    'blend_frames': 5  # Default blend frames for discrete system
+                    'blend_frames': 0
                 })
             
             # Start new segment (if not the last frame)
@@ -655,7 +651,7 @@ def convert_speed_data_to_segments(speed_curve_data, start_frame, end_frame, min
             'start_frame': start_frame,
             'end_frame': end_frame,
             'speed_multiplier': current_speed,
-            'blend_frames': 5
+            'blend_frames': 0
         })
     
     # Ensure no gaps or overlaps - make segments perfectly adjacent

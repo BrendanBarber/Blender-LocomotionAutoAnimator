@@ -54,10 +54,7 @@ class ANIMPATH_OT_create_path(Operator):
     def execute(self, context):
         try:
             # Import here to avoid circular imports
-            try:
-                from ..animation_path import create_animation_path_from_properties
-            except ImportError:
-                from animation_path import create_animation_path_from_properties
+            from ..animation_path import create_animation_path_from_properties
             
             path = create_animation_path_from_properties(context)
             curve_obj = path.create_blender_curve("AnimationPath")
@@ -96,10 +93,7 @@ class ANIMPATH_OT_update_path(Operator):
         
         try:
             # Import here to avoid circular imports
-            try:
-                from ..animation_path import AnimationPath
-            except ImportError:
-                from animation_path import AnimationPath
+            from ..animation_path import AnimationPath
             
             props = context.scene.animation_path_props
             path = AnimationPath(
@@ -273,8 +267,6 @@ class ANIMPATH_OT_delete_path(Operator):
         """Clean up Follow Path constraints and related keyframes"""
         cleanup_performed = False
 
-        print("*********************************************************************************************************")
-        
         try:
             # Get frame range from path object
             start_frame = path_obj.get("start_frame", 1)
@@ -363,7 +355,7 @@ class ANIMPATH_OT_delete_path(Operator):
             tracks_to_remove = []
             for track in armature_obj.animation_data.nla_tracks:
                 try:
-                    if track.name.startswith(f"LAA_{path_name}"):
+                    if track.name.startswith(f"LAA_{path_name}_"):
                         tracks_to_remove.append(track)
                 except (AttributeError, ReferenceError):
                     # Track may have been invalidated

@@ -52,8 +52,8 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
             start_pose = path_obj.get("start_pose", "NONE")
             end_pose = path_obj.get("end_pose", "NONE")
             main_anim = path_obj.get("anim", "NONE")
-            start_blend_frames = path_obj.get("start_blend_frames", 5)
-            end_blend_frames = path_obj.get("end_blend_frames", 5)
+            start_blend_frames = path_obj.get("start_blend_frames", 0)
+            end_blend_frames = path_obj.get("end_blend_frames", 0)
             
             # Ensure curve data path_duration matches the frame range
             if path_obj.data and hasattr(path_obj.data, 'path_duration'):
@@ -186,6 +186,7 @@ class ANIMPATH_OT_animate_object_along_path(Operator):
                     min_speed_factor=props.min_speed_factor, 
                     max_speed_factor=props.max_speed_factor,
                     use_keyframe_reduction=props.use_keyframe_reduction,
+                    use_blend_speed=props.blend_speed,
                     error_tolerance=props.keyframe_error_tolerance
                 )
                 

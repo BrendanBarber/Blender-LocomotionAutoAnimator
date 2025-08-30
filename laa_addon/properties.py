@@ -127,6 +127,13 @@ class AnimationPathProperties(PropertyGroup):
         update=property_update_callback
     )
 
+    blend_speed: BoolProperty(
+        name="Blend Speed",
+        description="Use the blend frames to determine speed, this will result in speeding up and slowing down at start and end",
+        default=False,
+        update=property_update_callback
+    )
+
     anim_speed_mult: FloatProperty(
         name="Animation Speed Multiplier",
         description="Change the base speed of the main animation, 1x is normal speed.",

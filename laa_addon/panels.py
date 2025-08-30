@@ -38,12 +38,12 @@ class ANIMPATH_PT_main_panel(Panel):
         props = context.scene.animation_path_props
         
         # Show auto-sync status
-        obj = context.active_object
-        if obj and obj.get("is_animation_path"):
-            box = layout.box()
-            box.label(text=f"🔄 Auto-syncing: {obj.name}", icon='LINKED')
-            box.label(text="Properties automatically update path", icon='INFO')
-            box.label(text="Curve shape preserved on edits", icon='CHECKMARK')
+        # obj = context.active_object
+        # if obj and obj.get("is_animation_path"):
+        #    box = layout.box()
+        #    box.label(text=f"🔄 Auto-syncing: {obj.name}", icon='LINKED')
+        #    box.label(text="Properties automatically update path", icon='INFO')
+        #    box.label(text="Curve shape preserved on edits", icon='CHECKMARK')
         
         # Main creation box
         box = layout.box()
@@ -51,14 +51,14 @@ class ANIMPATH_PT_main_panel(Panel):
         
         # Position setting section
         col = box.column(align=True)
-        col.label(text="Set Positions:", icon='CURSOR')
+        # col.label(text="Set Positions:", icon='CURSOR')
         
         # Quick set buttons
-        row = col.row(align=True)
-        row.operator("animpath.set_start_position", text="Set Start", icon='PLUS')
-        row.operator("animpath.set_end_position", text="Set End", icon='PLUS')
+        # row = col.row(align=True)
+        # row.operator("animpath.set_start_position", text="Set Start", icon='PLUS')
+        # row.operator("animpath.set_end_position", text="Set End", icon='PLUS')
         
-        col.separator()
+        # col.separator()
         
         # Numerical input fields for positions
         col.label(text="Start Position:")
@@ -77,9 +77,6 @@ class ANIMPATH_PT_main_panel(Panel):
         row = col.row(align=True)
         row.prop(props, "target_object", text="")
         row.operator("animpath.set_target_object", text="", icon='EYEDROPPER')
-        
-        if props.target_object:
-            col.label(text=f"Target: {props.target_object.name}", icon='CHECKMARK')
         
         col.separator()
         
@@ -179,10 +176,10 @@ class ANIMPATH_PT_object_animation(Panel):
                     col.separator()
                     
                     # Object offset controls
-                    col.label(text="Object Z Offset from Path:", icon='TRANSFORM_ORIGINS')
-                    col.prop(props, "object_z_offset", text="")
+                    # col.label(text="Object Z Offset from Path:", icon='TRANSFORM_ORIGINS')
+                    # col.prop(props, "object_z_offset", text="")
                     
-                    col.separator()
+                    # col.separator()
 
                     # Updated rotation checkbox with better description
                     col.prop(props, "use_rotation", text="Follow Curve Rotation")
@@ -192,28 +189,6 @@ class ANIMPATH_PT_object_animation(Panel):
                     # Main animation button
                     col.operator("animpath.animate_object_along_path", 
                                text="Animate Object + Rig", icon='PLAY')
-                    
-                    start_frame = obj.get("start_frame", 1)
-                    end_frame = obj.get("end_frame", 100)
-                    col.label(text=f"Frames: {start_frame} - {end_frame}")
-                    
-                    # Show pose/animation info
-                    start_pose = obj.get("start_pose", "NONE")
-                    main_anim = obj.get("anim", "NONE")
-                    end_pose = obj.get("end_pose", "NONE")
-                    
-                    if start_pose != "NONE" or main_anim != "NONE" or end_pose != "NONE":
-                        col.separator()
-                        info_box = col.box()
-                        info_box.label(text="Rig Animation Preview:", icon='INFO')
-                        
-                        if start_pose != "NONE":
-                            info_box.label(text=f"Start: {start_pose}", icon='POSE_HLT')
-                        if main_anim != "NONE":
-                            info_box.label(text=f"Main: {main_anim}", icon='ANIM')
-                        if end_pose != "NONE":
-                            info_box.label(text=f"End: {end_pose}", icon='POSE_HLT')
-                    
                 else:
                     box.label(text=f"⚠ Target object '{target_obj_name}' not found", icon='ERROR')
             else:
@@ -284,39 +259,27 @@ class ANIMPATH_PT_curvature_control(Panel):
     bl_region_type = 'UI'
     bl_options = {'DEFAULT_CLOSED'}
     
-    def draw_header(self, context):
-        props = context.scene.animation_path_props
-        self.layout.prop(props, "use_curvature_control", text="")
-    
     def draw(self, context):
         layout = self.layout
         props = context.scene.animation_path_props
         
-        # Only show settings if curvature control is enabled
-        layout.enabled = props.use_curvature_control
+        col = layout.column(align=True)
+        col.label(text="Speed Range:", icon='DRIVER')
         
-        if props.use_curvature_control:
-            col = layout.column(align=True)
-            col.label(text="Speed Range:", icon='DRIVER')
-            
-            row = col.row(align=True)
-            row.prop(props, "min_speed_factor", text="Curves")
-            row.prop(props, "max_speed_factor", text="Straights")
-            
+        row = col.row(align=True)
+        row.prop(props, "min_speed_factor", text="Curves")
+        row.prop(props, "max_speed_factor", text="Straights")
+        
+        col.separator()
+        
+        # Show speed range preview
+        if props.min_speed_factor > 0:
+            speed_range = props.max_speed_factor / props.min_speed_factor
             col.separator()
-            
-            # Show speed range preview
-            if props.min_speed_factor > 0:
-                speed_range = props.max_speed_factor / props.min_speed_factor
-                col.separator()
-                info_box = col.box()
-                info_box.label(text=f"Speed Variation: {speed_range:.1f}x", icon='INFO')
-                info_box.label(text=f"Curves: {props.min_speed_factor*100:.0f}% speed")
-                info_box.label(text=f"Straights: {props.max_speed_factor*100:.0f}% speed")
-        else:
-            col = layout.column()
-            col.label(text="Automatically adjusts speed based on", icon='INFO')
-            col.label(text="curve tightness for realistic motion")
+            info_box = col.box()
+            info_box.label(text=f"Speed Variation: {speed_range:.1f}x", icon='INFO')
+            info_box.label(text=f"Curves: {props.min_speed_factor*100:.0f}% speed")
+            info_box.label(text=f"Straights: {props.max_speed_factor*100:.0f}% speed")
 
 class ANIMPATH_PT_edit_panel(Panel):
     """Edit existing paths panel"""

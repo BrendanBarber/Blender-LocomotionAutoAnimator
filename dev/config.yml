@@ -1,0 +1,15 @@
+# Blender Addon Update Config
+
+# Path settings (Yes, I have Blender on Steam)
+blender_executable: "C:\Program Files (x86)\Steam\steamapps\common\Blender\blender.exe"
+blend_file: "C:\Users\brend\Desktop\Art\TDSummer\Blender-LocomotionAutoAnimator\example\LAA_example.blend"
+addon_folder: "C:\Users\brend\Desktop\Art\TDSummer\Blender-LocomotionAutoAnimator\laa_addon"
+output_zip: "C:\Users\brend\Desktop\Art\TDSummer\Blender-LocomotionAutoAnimator\laa_addon.zip"
+
+# Addon settings (Name in __init__.py)
+addon_name: "Locomotion Auto Animator"
+
+# Optional setings
+temp_folder: "C:\Temp\BlenderAddonTemp"
+backup_enabled: true
+verbose: true
